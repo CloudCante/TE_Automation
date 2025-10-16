@@ -51,9 +51,11 @@ main()
 {
 if [[ $counts -gt 1 ]]; then
     echo -e "${YELLOW}Two units detected, checking both units...${NOCOLOR}"
+    printf "${PURPLE}%-80s${NOCOLOR}\n" "------------------------------ Left Unit ------------------------------"
     lane_check $UNIT_1
-    lane_check $UNIT_2
     speed_check $UNIT_1 $gunit
+    printf "${PURPLE}%-80s${NOCOLOR}\n" "------------------------------ Right Unit ------------------------------"
+    lane_check $UNIT_2
     speed_check $UNIT_2 $gunit
 elif [[ $counts -eq 1 ]]; then
     echo -e "${YELLOW}Single unit detected, checking unit...${NOCOLOR}"
@@ -99,25 +101,21 @@ speed_check()
     speed=$(lspci -vv -s $port | grep "LnkSta:" | awk '{ print $3 }' | sed 's/,$//')
     echo -e "${BLUE}Port: $port is running at ${speed} ${NOCOLOR}"
 
-<<<<<<< HEAD
     if [[ $PN == 'G520' || $PN == 'G525' ]]; then 
-=======
-    if [[ $PN == 'G520' ]]; then 
->>>>>>> main
         if [[ $speed == "unknown" ]]; then
-            echo -e "${GREEN}Success: Port $port has sufficient speed (${speed} GT/s)${NOCOLOR}"
+            echo -e "${GREEN}Success: Port $port has sufficient speed ${PURPLE}(${speed} GT/s)${NOCOLOR}"
             echo -e "${GREEN}PCIe lane check pass${NOCOLOR}"
         else 
-            echo -e "${RED}Error: Port $port has less than 8 GT/s (${speed} GT/s)${NOCOLOR}"
+            echo -e "${RED}Error: Port $port has less than 8 GT/s ${PURPLE}(${speed} GT/s)${NOCOLOR}"
             pass=false
             echo -e "${RED}PCIe speed check fail${NOCOLOR}"
         fi
     else
         if [[ $speed == "8GT/s" ]]; then
-            echo -e "${GREEN}Success: Port $port has sufficient speed (${speed})${NOCOLOR}"
+            echo -e "${GREEN}Success: Port $port has sufficient speed ${PURPLE}(${speed})${NOCOLOR}"
             echo -e "${GREEN}PCIe lane check pass${NOCOLOR}"
         else
-            echo -e "${RED}Error: Port $port has less than 8 GT/s (${speed})${NOCOLOR}"
+            echo -e "${RED}Error: Port $port has less than 8 GT/s ${PURPLE}(${speed})${NOCOLOR}"
             pass=false
             echo -e "${RED}PCIe speed check fail${NOCOLOR}"
         fi
