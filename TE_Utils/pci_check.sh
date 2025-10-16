@@ -29,10 +29,11 @@ YELLOW='\e[33m'
 BLUE='\e[34m'
 PURPLE='\e[35m'
 NOCOLOR='\e[0m'
+WHITE='\e[47m'
 
 # Counts the number of boards inserted into the tester
 counts=$(./nvflash_mfg -A -a | grep "10DE" | wc -l)
-pass=true
+pass=0
 
 UNIT_1=$(lspci | grep NV | head -n 1 | awk '{ print $1 }')
 
@@ -68,7 +69,7 @@ fi
 
 sleep 2
 
-if [[ $pass == true ]]; then
+if [[ $pass == 0 ]]; then
     echo -e "\n${GREEN}All PCIe checks passed.${NOCOLOR}"
     exit 0
 else
@@ -81,15 +82,13 @@ lane_check()
 {
     local port=$1
     lanes=$(lspci -vv -s $port | grep "LnkSta:" | awk '{ print $5 }' | sed 's/,$//')
-    echo -e "${BLUE}Port: $port has $lanes lanes${NOCOLOR}"
+    echo -e "\n${WHITE}${BLUE}Port: $port SHOULD have x16 lanes${NOCOLOR}${NOCOLOR}\n"
 
     if [[ $lanes == "x16" ]]; then
-        echo -e "${GREEN}Success: Port $port has sufficient lanes (${lanes} lanes)${NOCOLOR}"
-        echo -e "${GREEN}PCIe lane check pass${NOCOLOR}"
+        echo -e "${GREEN}Success: Port $port has sufficient lanes (${lanes} lanes)${NOCOLOR}\n"
     else
-        echo -e "${RED}Error: Port $port has less than 16 lanes (${lanes} lanes)${NOCOLOR}"
-        pass=false
-        echo -e "${RED}PCIe lane check fail${NOCOLOR}"
+        echo -e "${RED}Error: Port $port has less than 16 lanes (${lanes} lanes)${NOCOLOR}\n"
+        pass=1
     fi
 }
 
@@ -97,27 +96,23 @@ speed_check()
 {
     local port=$1
     local PN=$2
-    # echo -e "${PURPLE}$PN${NOCOLOR}"
     speed=$(lspci -vv -s $port | grep "LnkSta:" | awk '{ print $3 }' | sed 's/,$//')
-    echo -e "${BLUE}Port: $port is running at ${speed} ${NOCOLOR}"
 
     if [[ $PN == 'G520' || $PN == 'G525' ]]; then 
+        echo -e "${WHITE}${BLUE}Port: $port is SHOULD be running at unknown GT/s ${NOCOLOR}${NOCOLOR}\n"
         if [[ $speed == "unknown" ]]; then
-            echo -e "${GREEN}Success: Port $port has sufficient speed ${PURPLE}(${speed} GT/s)${NOCOLOR}"
-            echo -e "${GREEN}PCIe lane check pass${NOCOLOR}"
+            echo -e "${GREEN}Success: Port $port has sufficient speed ${PURPLE}(${speed} GT/s)${NOCOLOR}\n"
         else 
-            echo -e "${RED}Error: Port $port has less than 8 GT/s ${PURPLE}(${speed} GT/s)${NOCOLOR}"
-            pass=false
-            echo -e "${RED}PCIe speed check fail${NOCOLOR}"
+            echo -e "${RED}Error: Port $port has less than 8 GT/s ${PURPLE}(${speed} GT/s)${NOCOLOR}\n"
+            pass=1
         fi
     else
+        echo -e "${WHITE}${BLUE}Port: $port is SHOULD be running at 8 GT/s ${NOCOLOR}${NOCOLOR}\n"
         if [[ $speed == "8GT/s" ]]; then
-            echo -e "${GREEN}Success: Port $port has sufficient speed ${PURPLE}(${speed})${NOCOLOR}"
-            echo -e "${GREEN}PCIe lane check pass${NOCOLOR}"
+            echo -e "${GREEN}Success: Port $port has sufficient speed ${PURPLE}(${speed})${NOCOLOR}\n"
         else
-            echo -e "${RED}Error: Port $port has less than 8 GT/s ${PURPLE}(${speed})${NOCOLOR}"
-            pass=false
-            echo -e "${RED}PCIe speed check fail${NOCOLOR}"
+            echo -e "${RED}Error: Port $port has less than 8 GT/s ${PURPLE}(${speed})${NOCOLOR}\n"
+            pass=1
         fi
     fi
 }
