@@ -8,9 +8,9 @@
 ##
 ## Version History
 ##-------------------------------
-## Version       : 1.0.3
-## Release date  : 2024-05-09
-## Revised by    : Winter Liu
+## Version       : 1.0.4
+## Release date  : 2024-11-01
+## Revised by    : Thay Khang
 ## Description   : Initial release
 ## add PG520 IST files download 2024-06-04
 ## add run_mode for debug 2024-08-08
@@ -40,7 +40,7 @@ export NC_diagserver_IP="192.168.102.21"
 export NC_API_IP="192.168.102.20"
 export TJ_API_IP="10.67.240.66"
 export OPID="$Diag_Path/OPID/OPID.ini"  ###add check operator ID 4/4/2024####
-export Script_File="Sort_autotest.sh"
+export Script_File="$Diag_Path/Sort_autotest.sh"
 export ISTdata="/home/diags/ISTdata" ###IST folder###2024-06-04
 export IST_file="FXSJ_Zipped_DFX_GH100_IST_MUPT_RMA_Images_h100.7.tar.gz" ###IST file name###2024-06-04
 export MODS_VER="525.213.tar.gz"
@@ -1145,6 +1145,17 @@ else
 	Final_status="Final status"
 fi	
 
+# Get the BIOS Version from the tmp.log file
+bios="$(get_bios ${Input_Upper_PN})" 2>&1
+# If get_bios was not successfull
+if [[ $? != 0 ]]; then
+	# Use the BIOS Version from Wareconn, which is located locally in /cfg/<SN>.RSP
+    bios="$(echo $BIOS_VER | egrep "[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}$")"
+    if [[ $? != 0 ]]; then
+        echo "WARNING: Invalid BIOS Version($BIOS_VER) found, check your Wareconn configuration file"
+    fi
+fi
+
 end_time=`date +"%Y%m%d_%H%M%S"`
 filename=$1_"${current_stc_name}"_"$end_time"_$2.log
 
@@ -1158,6 +1169,7 @@ echo "Part number             :${Input_Upper_PN}" >>"${filename}"
 echo "Serial number           :${1}" >>"${filename}"
 echo "operator_id             :`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`" >>"${filename}"
 echo "fixture_id              :`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`" >>"${filename}"
+echo "Bios Version            :$bios" >>"${filename}"
 echo " " >>"${filename}"
 echo "============================================================================" >>"${filename}"
 echo "$Final_status: ${2}" >> "${filename}"
@@ -1374,14 +1386,14 @@ script_check()
 		echo "Script Version is ${Script_VER}"
 	else
 		echo "Script Version is ${Script_VER}"
-		if [ -f ${Diag_Path}/${Input_Script}_${Script_File} ];then
-			cp -rf ${Diag_Path}/${Input_Script}_${Script_File} /home/diags/nv/$Script_File
+		if [ -f $Script_File ];then
+			cp -rf $Script_File /home/diags/nv
 			sleep 15
 			reboot
 		else
 			Input_Server_Connection
-			if [ -f ${Diag_Path}/${Input_Script}_${Script_File} ];then
-				cp -rf ${Diag_Path}/${Input_Script}_${Script_File} /home/diags/nv/$Script_File
+			if [ -f $Script_File ];then
+				cp -rf $Script_File /home/diags/nv
 				sleep 15
 				reboot
 			else
@@ -1441,8 +1453,37 @@ prepare_file()
 
 }
 
+##**********************************************************************************
+## Function to search for the BIOS version of the SXM from the tmp.log file
+## in <SN>_Basic log folder
+## name          : get_bios
+## param $1      : <serial number> - serial number of SXM
+##**********************************************************************************
+get_bios(){	
+	cd $mods
+    # Find *_Basic folder and tmp.log file
+    tmp_log="$(find $LOGFILE -name "*${1}*_Basic")/tmp.log"
+    if [[ ! -f $tmp_log ]]; then
+        echo "WARNING: Log file $tmp_log was not found, unable to search for BIOS Version."
+        exit 1
+    fi
 
-	
+    # Grep for the bios version in the tmp.log file
+    grep_results="$(egrep "^Version\s+:\s[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}$" $tmp_log 2>&1)"
+    if [[ $? != 0 ]]; then
+        echo "WARNING: BIOS Version was not found in $tmp_log"
+        exit 1
+    fi
+
+    # Verify the version format
+    bios="$(echo $grep_results | cut -d ":" -f2 | egrep "[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}$")"
+    if [[ $? != 0 ]]; then
+        echo "WARNING: Found BIOS Version($grep_results) found in $tmp_log is invalid."
+        exit 1
+    fi
+
+    echo $bios
+}
 
 #############################################################################################################
 #############################################################################################################
