@@ -18,6 +18,12 @@
 ## add PG520 looping or stuck issue reboot and run step2 2024-11-07
 ## add check IST file md5sum 2024-11-07
 ## add integration of new scripts that broke automation 2025-02-26
+##-------------------------------
+## Version       : 1.0.7
+## Release date  : 2025-09-11
+## Revised by    : Anyi Wang
+## Description   : 1. modify bios="$(get_bios ${Input_PN})" to $(get_bios ${Output_SN})
+## Description   : 2. modify if find zip file condition in run_command function
 ##**********************************************************************************
 
 export Local_Logs="/home/diags/nv/logs"
@@ -51,7 +57,7 @@ export IST_folder="DFX_GH100_IST_MUPT_RMA_Images_h100.7"
 export MODS_VER="525.213.tar.gz"
 export MODS_folder="525.213"
 
-Script_VER="1.0.6"
+Script_VER="1.0.7"
 CFG_VERSION="1.0"
 PROJECT="SORT_TESLA"
 Process_Result=""
@@ -713,7 +719,7 @@ DownLoad()
 						show_pass_message "DownLoad Diag pass"
 					fi
 				else
-					show_fail_message "${Diag_Path}/HEAVEN/$DFX"a
+					show_fail_message "${Diag_Path}/HEAVEN/$DFX"
 					show_fail_message "DFX doesn't exist Please Call TE"
 					show_fail_message "DownLoad DFX FAIL"
 					exit 1
@@ -771,7 +777,7 @@ Upload_End_Log()
 	Final_status="Final status"
 
 	# Get the BIOS Version from the tmp.log file
-	bios="$(get_bios ${Input_PN})" 2>&1
+	bios="$(get_bios ${Output_SN} 2>&1)"
 	# If get_bios was not successfull
 	if [[ $? != 0 ]]; then
 		# Use the BIOS Version from Wareconn, which is located locally in /cfg/<SN>.RSP
@@ -865,10 +871,10 @@ run_command()
 		#instead of using exit status, we can check the log file for the string "_P_" or "_F_"
 		#this will allow us to determine if the test passed or failed
 		#more reliably than relying on the exit code
-		if find $mods -maxdepth 2 -type f -name "*${Output_SN}_P_*.zip" | grep -q .; then
-			exit_status=0
-		elif find $mods -maxdepth 2 -type f -name "*${Output_SN}_F_*.zip" | grep -q .; then
+		if find $mods -maxdepth 2 -type f -name "*${Output_SN}_F_*.zip" | grep -q .; then
 			exit_status=1
+		elif find $mods -maxdepth 2 -type f -name "*${Output_SN}_P_*.zip" | grep -q .; then
+			exit_status=0
 		else
 			show_warn_message "NO ZIP FILE FOUND"
 		fi
