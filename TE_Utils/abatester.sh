@@ -1,9 +1,17 @@
 #!/bin/bash
 ## Project       : ABAG3Tester 
 ## Filename      : abatester.sh
+## Version       : 1.0.0
 ## Release date  : 2025-09-11
 ## Revised by    : Anyi Wang
 ## Description   : Test G3 tester by automatically executing FLA BAT offline testing twice
+##--------------------------------------------------------------------------------------------------------------------------------
+## Version       : 1.0.1
+## Release date  : 2025-11-04
+## Revised by    : Anyi Wang
+## Description   : 1.remove get token - from 1.1.2_autotest.sh
+## Description   : 2.add retry api function - from 1.1.2_autotest.sh
+## Description   : 3.add Gen5 support
 ##**********************************************************************************
 
 [ -d "/mnt/nv/logs/" ] || mkdir /mnt/nv/logs
@@ -60,7 +68,7 @@ declare -a single_list_stn=()
 declare -a list_st_all=()
 
 
-Script_VER="1.1.1"  
+Script_VER="1.0.1"  
 CFG_VERSION="1.1.1"
 PROJECT="TESLA"
 Process_Result=""
@@ -124,6 +132,32 @@ get_config()
 }
 export DEBUG_MODE=$(get_config "DEBUG_MODE")
 
+####install tool########################################################################################
+update()
+{
+
+	####ntpdate install###
+	if [ ! -f /usr/sbin/ntpdate ];then
+		if [ -f $Diag_Path/updates/ntpdate-4.2.6p5-28.el7.centos.x86_64.rpm ];then
+			cp $Diag_Path/updates/ntpdate-4.2.6p5-28.el7.centos.x86_64.rpm $mods
+			rpm -Uvh $mods/ntpdate-4.2.6p5-28.el7.centos.x86_64.rpm
+		else
+			show_fail_message "update files ntpdate not exist !!!"
+			exit 1
+		fi	
+	fi
+
+	####jq install####
+			
+	if [ ! -f /usr/bin/jq ];then
+		if [ -f $Diag_Path/updates/jq ];then
+			cp $Diag_Path/updates/jq /usr/bin
+		else
+			show_fail_message "update files ntpdate not exist !!!"
+			exit 1
+		fi	
+	fi
+}
 
 
 ######################################################################
@@ -201,6 +235,18 @@ show_fail_message()
      echo
 }
 
+######################################################################
+#                                                                    #
+# Show Warning message (color: yellow)                                     #
+#                                                                    #
+######################################################################
+show_warning_message()
+{ 
+     tput bold
+     TEXT=$1
+     echo -ne "\033[33m$TEXT \033[0m"
+	 echo 
+}
 
 #####################################################################
 #                                                                   #
@@ -265,80 +311,79 @@ show_fail()
 	
 }
 
-
-####install tool########################################################################################
-update()
+#################capture "ctrl+c"############################################
+function trap_ctrlc()
 {
+	# perform cleanup here 2024-12-14
 
-####ntpdate install###
-if [ ! -f /usr/sbin/ntpdate ];then
-	if [ -f $Diag_Path/updates/ntpdate-4.2.6p5-28.el7.centos.x86_64.rpm ];then
-		cp $Diag_Path/updates/ntpdate-4.2.6p5-28.el7.centos.x86_64.rpm $mods
-		rpm -Uvh $mods/ntpdate-4.2.6p5-28.el7.centos.x86_64.rpm
-	else
-		show_fail_message "update files ntpdate not exist !!!"
-		exit 1
-	fi	
-fi
+	echo -e ""
+	echo -e ""
+	echo -e "\033[47;30m\033[05m	LINE No: ${LINENO}	Ctrl-C caught ...	\033[0m"
+	echo -e ""
+	echo -e ""
+if [ -n "${diag_VER}" ];then
+	if [ $mods/$diag_VER ];then
+		rm -rf $mods/$diag_VER
+		echo "delete local diag $diag_VER complete"
+	fi
+fi	
 
-####jq install####
-		
-if [ ! -f /usr/bin/jq ];then
-	if [ -f $Diag_Path/updates/jq ];then
-		cp $Diag_Path/updates/jq /usr/bin
-	else
-		show_fail_message "update files ntpdate not exist !!!"
-		exit 1
-	fi	
-fi
+	exit 1
 }
+trap "trap_ctrlc" 2
 
 ########################################################################################################
 Input_Wareconn_Serial_Number_RestAPI_Mode_ItemInfo()
 {
 
-station_name=""
-Eboard_SN=""
-Eboard=""
-HS_QR_CODE=""
-Input_RestAPI_Message=""
-part_number=""
-service_status=""
-board_699pn=""
-###API
+	station_name=""
+	Eboard_SN=""
+	Eboard=""
+	HS_QR_CODE=""
+	Input_RestAPI_Message=""
+	part_number=""
+	service_status=""
+	board_699pn=""
+	###API
 
-##get_token#############################
+	##get_information from wareconn#########
+	echo "get data information from wareconn"
 
-echo "get token from wareconn API"
-Input_RestAPI_Message=$(curl -k "https://$API_IP:4443/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
-if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-	token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
-	show_pass_message "get_token successful:$token"	
-else
-	show_fail_message "$Input_RestAPI_Message"
-	show_fail_message "get token Fail Please check net cable or call TE"
-	exit 1
-fi
+	max_attempts=3
+	attempt=1
+	sleep_time=5
+	timeout=60
+	while [ $attempt -le $max_attempts ]; do
+		show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+		Input_RestAPI_Message=$(curl -m 60 -k "$iurl?serial_number=$1") ####add parameters type 2024-05-07 
+		curl_exit_code=$?
 
-##get_information from wareconn#########
-echo "get data information from wareconn"
-Input_RestAPI_Message=$(curl -k "$iurl?serial_number=$1" -H "content-type: application/json" -H "Authorization: Bearer "$token"") ####add parameters type 2024-05-07 
-#echo $Input_RestAPI_Message
-#pause
-if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-	station_name=$(echo "$Input_RestAPI_Message" | jq -r '.list.now_stn')
-	Eboard_SN=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_serial_number')
-	Eboard=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_name')
-	HS_QR_CODE=$(echo "$Input_RestAPI_Message" | jq -r '.list.assy_records[-1].serial_number')
-	part_number=$(echo "$Input_RestAPI_Message" | jq -r '.list.part_number')
-	service_status=$(echo "$Input_RestAPI_Message" | jq -r '.list.is_serving')
-	board_699pn=$(echo "$Input_RestAPI_Message" | jq -r '.list."699pn"')
-	show_pass_msg "$1 Get data information from wareconn!!!"
-else	
-	show_fail_message "$Input_RestAPI_Message"
-	show_fail_message "$1 Get Data information from Wareconn Fail Please call TE"
-	exit 1
-fi	
+		if [ $curl_exit_code -eq 0 ]; then
+			break
+		fi
+
+		if [ $attempt -lt $max_attempts ]; then
+			sleep $sleep_time
+		fi
+
+		((attempt++))
+	done
+	#echo $Input_RestAPI_Message
+	#pause
+	if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+		station_name=$(echo "$Input_RestAPI_Message" | jq -r '.list.now_stn')
+		Eboard_SN=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_serial_number')
+		Eboard=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_name')
+		HS_QR_CODE=$(echo "$Input_RestAPI_Message" | jq -r '.list.replace_parts[-1].sn')
+		part_number=$(echo "$Input_RestAPI_Message" | jq -r '.list.part_number')
+		service_status=$(echo "$Input_RestAPI_Message" | jq -r '.list.is_serving')
+		board_699pn=$(echo "$Input_RestAPI_Message" | jq -r '.list."699pn"')
+		show_pass_msg "$1 Get data information from wareconn!!!"
+	else	
+		show_fail_message "$Input_RestAPI_Message"
+		show_fail_message "$1 Get Data information from Wareconn Fail Please call TE"
+		exit 1
+	fi	
 
 
 }
@@ -346,98 +391,100 @@ fi
 ###get information from wareconn#### 
 Input_Wareconn_Serial_Number_RestAPI_Mode()
 {
-###API
+	###API
 
-now_stn=""
-Input_RestAPI_Message=""
-##get_token#############################
+	now_stn=""
+	Input_RestAPI_Message=""
 
-echo "get token from wareconn API"
-Input_RestAPI_Message=$(curl -k "https://$API_IP:4443/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
-if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-	token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
-	show_pass_message "get_token successful:$token"	
-else
-	show_fail_message "$Input_RestAPI_Message"
-	show_fail_message "get token Fail Please check net cable or call TE"
-	exit 1
-fi
+	##get_information from wareconn#########
+	echo "get test information from wareconn API "
+	max_attempts=3
+	attempt=1
+	sleep_time=5
+	timeout=60
+	while [ $attempt -le $max_attempts ]; do
+		show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."
+		
+		Input_RestAPI_Message=$(curl -m 60 -k "$surl?serial_number=$1&type=stc&stc_name=$2")
+		curl_exit_code=$?
 
+		if [ $curl_exit_code -eq 0 ]; then
+			break
+		fi
 
-##get_information from wareconn#########
-echo "get test information from wareconn API "
-	if [ $Run_Mode = 0 ];then
-		Input_RestAPI_Message=$(curl -k "$surl?serial_number=$1&type=war,sta" -H "content-type: application/json" -H "Authorization: Bearer "$token"") ####add parameters type 2024-05-07
+		if [ $attempt -lt $max_attempts ]; then
+			sleep $sleep_time
+		fi
+
+		((attempt++))
+	done	
+	if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+		if [ -f $mods/cfg/$1.RSP ] && [ "$Run_Mode" = "0" ];then
+			Fstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
+			findlog=$(find $Local_Logs/ -name "$1_${Fstation}_`date +"%Y%m%d"`*PASS.log" 2>/dev/null)
+				
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"code":0,"data"://g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/{{//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/}}//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\[//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\]//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/:/=/g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"//g')
+			echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
+			Sstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
+			if [ -n "$findlog" ] && [ "$Fstation" = "$Sstation" ];then
+				show_fail_message "$1 have pass $Fstation station but wareconn not please wait a minute and retest"
+				show_fail_message "if still not pass next station please call TE or wareconn team!!!"
+				exit 1
+			else
+				show_pass_msg "$1 Get test information from wareconn!!!"
+			fi
+		else
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"code":0,"data"://g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/{{//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/}}//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\[//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\]//g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/:/=/g')
+			Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"//g')
+			echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
+			show_pass_msg "$1 Get test information from wareconn!!!"
+		fi
 	else
-		Input_RestAPI_Message=$(curl -k "$surl?serial_number=$1&type=stc&stc_name=$2" -H "content-type: application/json" -H "Authorization: Bearer "$token"")
-	fi
-if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-	if [ -f $mods/cfg/$1.RSP ] && [ "$Run_Mode" = "0" ];then
-		Fstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
-		findlog=$(find $Local_Logs/ -name "$1_${Fstation}_`date +"%Y%m%d"`*PASS.log" 2>/dev/null)
-			
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"code":0,"data"://g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/{{//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/}}//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\[//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\]//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/:/=/g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"//g')
-		echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
-		Sstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
-		#if [ -n "$findlog" ] && [ "$Fstation" = "$Sstation" ];then
-			#show_fail_message "$1 have pass $Fstation station but wareconn not please wait a minute and retest"
-			#show_fail_message "if still not pass next station please call TE or wareconn team!!!"
-			#exit 1
-		#else
-			#show_pass_msg "$1 Get test information from wareconn!!!"
-		#fi
-	else
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"code":0,"data"://g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/{{//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/}}//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\[//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\]//g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/:/=/g')
-		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"//g')
-		echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
-		show_pass_msg "$1 Get test information from wareconn!!!"
-	fi
-else
-	show_fail_message "$Input_RestAPI_Message"
-	show_fail_message "$1 Get test information from Wareconn Fail Please call TE"
-	exit 1
+		show_fail_message "$Input_RestAPI_Message"
+		show_fail_message "$1 Get test information from Wareconn Fail Please call TE"
+		exit 1
 
-fi
+	fi
 	
 }
 
 ##mount server folder#################################################
 Input_Server_Connection()
 {
-echo -e "\033[33m	Network Contacting : $Diag_Path	, Wait .....	\033[0m"
-while true
-	do
-		umount $Diag_Path >/dev/null 2>&1
-		mount -t cifs -o username=administrator,password=$pw_diag //$diagserver_IP/e/current $Diag_Path
-		if [ $? -eq 0 ];then
-			break
-		fi	
-	done	
-echo -e ""
-sleep 5
-echo -e "\033[33m	Network Contacting : $Logs_Path	, Wait .....	\033[0m"
+	echo -e "\033[33m	Network Contacting : $Diag_Path	, Wait .....	\033[0m"
+	while true
+		do
+			umount $Diag_Path >/dev/null 2>&1
+			mount -t cifs -o username=administrator,password=$pw_diag //$diagserver_IP/e/current $Diag_Path
+			if [ $? -eq 0 ];then
+				break
+			fi	
+		done	
+	echo -e ""
+	sleep 5
+	echo -e "\033[33m	Network Contacting : $Logs_Path	, Wait .....	\033[0m"
 
-while true
-	do
-		umount $Logs_Path >/dev/null 2>&1
-		mount -t cifs -o username=administrator,password=$pw_log //$logserver_IP/d $Logs_Path
-		if [ $? -eq 0 ];then
-			break
-		fi	
-	done	
-echo -e ""
-sleep 5
+	while true
+		do
+			umount $Logs_Path >/dev/null 2>&1
+			mount -t cifs -o username=administrator,password=$pw_log //$logserver_IP/d $Logs_Path
+			if [ $? -eq 0 ];then
+				break
+			fi	
+		done	
+	echo -e ""
+	sleep 5
 
 }
 
@@ -559,59 +606,59 @@ Output_Scan_Infor()
 #####Read serial number from tester###################################
 Read_SN()
 {
-if [ ! -f "nvflash_mfg" ] || [ ! -f "uutself.cfg.env" ];then
-	Input_Server_Connection
-	if [ -f $Diag_Path/nvflash_mfg ] && [ -f $Diag_Path/uutself.cfg.env ];then
-		cp $Diag_Path/nvflash_mfg ./
-		[ ! -f "uutself.cfg.env" ] && cp $Diag_Path/uutself.cfg.env ./
-	else
-		show_warning_message "Please call TE to check diag server, nvflash_mfg or uutself.cfg.env is not exist"
-		exit 1
-	fi	
-fi
-	
-counts=$(./nvflash_mfg -A -a | grep "10DE" | wc -l)
+	if [ ! -f "nvflash_mfg" ] || [ ! -f "uutself.cfg.env" ];then
+		Input_Server_Connection
+		if [ -f $Diag_Path/nvflash_mfg ] && [ -f $Diag_Path/uutself.cfg.env ];then
+			cp $Diag_Path/nvflash_mfg ./
+			[ ! -f "uutself.cfg.env" ] && cp $Diag_Path/uutself.cfg.env ./
+		else
+			show_warning_message "Please call TE to check diag server, nvflash_mfg or uutself.cfg.env is not exist"
+			exit 1
+		fi	
+	fi
+		
+	counts=$(./nvflash_mfg -A -a | grep "10DE" | wc -l)
 
-if [ $counts = "2" ]; then
-	port1=$(lspci | grep NV | head -n 1 | awk '{ print $1 }')
-	port2=$(lspci | grep NV | tail -n 1 | awk '{ print $1 }')
-	Output_Upper_SN=$(./nvflash_mfg -B $port1  --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-	Output_Upper_699PN=$(./nvflash_mfg -B $port1  --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-	Output_Lower_SN=$(./nvflash_mfg -B $port2  --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-	Output_Lower_699PN=$(./nvflash_mfg -B $port2  --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-	if [ -z ${Output_Upper_SN} ] && [ -z ${Output_Lower_SN} ]; then
-		show_fail_msg "Read SN error Please check!!!"
-		exit 1
+	if [ $counts = "2" ]; then
+		port1=$(lspci | grep NV | head -n 1 | awk '{ print $1 }')
+		port2=$(lspci | grep NV | tail -n 1 | awk '{ print $1 }')
+		Output_Upper_SN=$(./nvflash_mfg -B $port1  --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+		Output_Upper_699PN=$(./nvflash_mfg -B $port1  --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+		Output_Lower_SN=$(./nvflash_mfg -B $port2  --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+		Output_Lower_699PN=$(./nvflash_mfg -B $port2  --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+		if [ -z ${Output_Upper_SN} ] && [ -z ${Output_Lower_SN} ]; then
+			show_fail_msg "Read SN error Please check!!!"
+			exit 1
+		else
+			show_pass_message "######SerialNumber1:$Output_Upper_SN######"
+			show_pass_message "######SerialNumber2:$Output_Lower_SN######" 
+			show_pass_msg "Read SN OK"
+			testqty="2"
+		fi
+	elif [ $counts = "1" ]; then
+		Output_Upper_SN=$(./nvflash_mfg --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+		Output_Upper_699PN=$(./nvflash_mfg --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+		if [ -z ${Output_Upper_SN} ]; then
+			show_fail_msg "Read SN error Please check!!!"
+			exit 1
+		else
+			show_pass_message "######SerialNumber1:$Output_Upper_SN######"
+			show_pass_msg "Read SN OK"
+			testqty="1"	
+		fi
 	else
-		show_pass_message "######SerialNumber1:$Output_Upper_SN######"
-		show_pass_message "######SerialNumber2:$Output_Lower_SN######" 
-		show_pass_msg "Read SN OK"
-		testqty="2"
+		Output_Upper_SN=$(printf $(python3 aardvark/aai2c_fru_eeprom.py 0 400 read 0x50 0x00 256 | cut -d ":" -f 2 | tail -n +5 | xargs | sed 's/ / \\x/ g'| sed 's/^/\\x/' | tr -d " " ) | LC_ALL=C sed 's/[^ -~]/ /g' | xargs -0 | tr ' ' '\n' | awk '$1 ~ /[0-9]{13}/{print $1}' | tail -n -1 )
+		if [ -n "$Output_Upper_SN" ];then
+			show_pass_message "######SerialNumber1:$Output_Upper_SN######"
+			show_pass_msg "Read SN OK"
+			testqty="1"
+		else	
+			show_fail_message "Can't Detect Cards Please Inserd one Card"
+			show_fail_msg "Read SN FAIL"
+			exit 1
+		fi	
+		
 	fi
-elif [ $counts = "1" ]; then
-	Output_Upper_SN=$(./nvflash_mfg --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-	Output_Upper_699PN=$(./nvflash_mfg --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-	if [ -z ${Output_Upper_SN} ]; then
-		show_fail_msg "Read SN error Please check!!!"
-		exit 1
-	else
-		show_pass_message "######SerialNumber1:$Output_Upper_SN######"
-		show_pass_msg "Read SN OK"
-		testqty="1"	
-	fi
-else
-	#Output_Upper_SN=$(printf $(python3 aardvark/aai2c_fru_eeprom.py 0 400 read 0x50 0x00 256 | cut -d ":" -f 2 | tail -n +5 | xargs | sed 's/ / \\x/ g'| sed 's/^/\\x/' | tr -d " " ) | LC_ALL=C sed 's/[^ -~]/ /g' | xargs -0 | tr ' ' '\n' | awk '$1 ~ /[0-9]{13}/{print $1}' | tail -n -1 )
-	if [ -n "$Output_Upper_SN" ];then
-		show_pass_message "######SerialNumber1:$Output_Upper_SN######"
-		show_pass_msg "Read SN OK"
-		testqty="1"
-	else	
-		show_fail_message "Can't Detect Cards Please Inserd one Card"
-		show_fail_msg "Read SN FAIL"
-		exit 1
-	fi	
-	
-fi
 	 
 }
 
@@ -620,33 +667,17 @@ fi
 DownLoad()
 {
 
-#####Prepare diag######
-cd $mods 
-ls | grep -v cfg | xargs rm -fr
-if [ -n "${diag_name}" ];then
-	if [ -d ${Diag_Path}/${MACHINE}/${diag_name} ]; then
-	#if [ -d ${Diag_Path}/${Input_Upper_PN}/${diag_name} ]; then
-		show_pass_message "DownLoad Diag From Server Please Waiting ..."
-		#echo "${diag_VER}"
-		#pause
-		#cp -rf ${Diag_Path}/${Input_Upper_PN}/${diag_name}/* $mods
-		cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
-		cd $mods
-		tar -xf ${diag_VER} 
-		if [ $? -ne 0 ];then
-			show_fail_message "Please make sure exist diag zip files"
-			show_fail_msg "DownLoad Diag FAIL"
-			exit 1
-		fi	
-		#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* 
-		
-	else
-		Input_Server_Connection
+	#####Prepare diag######
+	cd $mods 
+	ls | grep -v cfg | xargs rm -fr
+	if [ -n "${diag_name}" ];then
 		if [ -d ${Diag_Path}/${MACHINE}/${diag_name} ]; then
 		#if [ -d ${Diag_Path}/${Input_Upper_PN}/${diag_name} ]; then
 			show_pass_message "DownLoad Diag From Server Please Waiting ..."
-			cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
+			#echo "${diag_VER}"
+			#pause
 			#cp -rf ${Diag_Path}/${Input_Upper_PN}/${diag_name}/* $mods
+			cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
 			cd $mods
 			tar -xf ${diag_VER} 
 			if [ $? -ne 0 ];then
@@ -654,35 +685,37 @@ if [ -n "${diag_name}" ];then
 				show_fail_msg "DownLoad Diag FAIL"
 				exit 1
 			fi	
-			#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* ./
+			#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* 
+			
 		else
-			show_fail_message "Diag isn't exist Please Call TE"
-			show_fail_msg "DownLoad Diag FAIL"
-			exit 1
-		fi	
-	fi
-else
-	show_warning_message "diag_name is null, please call TE to check the wareconn settings"
-	exit 1
-fi	
-#####Prepare HEAVEN#####
-if [ ! $HEAVEN_VER = "NA" ];then	
-	if [ -f $HEAVEN/$HEAVEN_VER ];then
-		show_pass_message "DownLoad HEAVEN From Local Please Waiting ..."
-		cp -rf $HEAVEN/$HEAVEN_VER $mods/core/mods0
-		cd $mods/core/mods0
-		tar -xf $HEAVEN_VER 
-		if [ $? -ne 0 ];then
-			show_fail_message "Please make sure exist HEAVEN zip files"
-			show_fail_msg "DownLoad HEAVEN FAIL"
-			exit 1
-		fi		
+			Input_Server_Connection
+			if [ -d ${Diag_Path}/${MACHINE}/${diag_name} ]; then
+			#if [ -d ${Diag_Path}/${Input_Upper_PN}/${diag_name} ]; then
+				show_pass_message "DownLoad Diag From Server Please Waiting ..."
+				cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
+				#cp -rf ${Diag_Path}/${Input_Upper_PN}/${diag_name}/* $mods
+				cd $mods
+				tar -xf ${diag_VER} 
+				if [ $? -ne 0 ];then
+					show_fail_message "Please make sure exist diag zip files"
+					show_fail_msg "DownLoad Diag FAIL"
+					exit 1
+				fi	
+				#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* ./
+			else
+				show_fail_message "Diag isn't exist Please Call TE"
+				show_fail_msg "DownLoad Diag FAIL"
+				exit 1
+			fi	
+		fi
 	else
-		#echo "${Diag_Path}/HEAVEN/$HEAVEN_VER"
-		#pause
-		if [ -f ${Diag_Path}/HEAVEN/$HEAVEN_VER ]; then
-			show_pass_message "DownLoad HEAVEN From Server Please Waiting ..."
-			cp -rf ${Diag_Path}/HEAVEN/$HEAVEN_VER $HEAVEN
+		show_warning_message "diag_name is null, please call TE to check the wareconn settings"
+		exit 1
+	fi	
+	#####Prepare HEAVEN#####
+	if [ ! $HEAVEN_VER = "NA" ];then	
+		if [ -f $HEAVEN/$HEAVEN_VER ];then
+			show_pass_message "DownLoad HEAVEN From Local Please Waiting ..."
 			cp -rf $HEAVEN/$HEAVEN_VER $mods/core/mods0
 			cd $mods/core/mods0
 			tar -xf $HEAVEN_VER 
@@ -692,7 +725,8 @@ if [ ! $HEAVEN_VER = "NA" ];then
 				exit 1
 			fi		
 		else
-			Input_Server_Connection
+			#echo "${Diag_Path}/HEAVEN/$HEAVEN_VER"
+			#pause
 			if [ -f ${Diag_Path}/HEAVEN/$HEAVEN_VER ]; then
 				show_pass_message "DownLoad HEAVEN From Server Please Waiting ..."
 				cp -rf ${Diag_Path}/HEAVEN/$HEAVEN_VER $HEAVEN
@@ -705,57 +739,72 @@ if [ ! $HEAVEN_VER = "NA" ];then
 					exit 1
 				fi		
 			else
-				show_fail_message "HEAVEN isn't exist Please Call TE"
-				show_fail_msg "DownLoad HEAVEN FAIL"
-				exit 1 
+				Input_Server_Connection
+				if [ -f ${Diag_Path}/HEAVEN/$HEAVEN_VER ]; then
+					show_pass_message "DownLoad HEAVEN From Server Please Waiting ..."
+					cp -rf ${Diag_Path}/HEAVEN/$HEAVEN_VER $HEAVEN
+					cp -rf $HEAVEN/$HEAVEN_VER $mods/core/mods0
+					cd $mods/core/mods0
+					tar -xf $HEAVEN_VER 
+					if [ $? -ne 0 ];then
+						show_fail_message "Please make sure exist HEAVEN zip files"
+						show_fail_msg "DownLoad HEAVEN FAIL"
+						exit 1
+					fi		
+				else
+					show_fail_message "HEAVEN isn't exist Please Call TE"
+					show_fail_msg "DownLoad HEAVEN FAIL"
+					exit 1 
+				fi
 			fi
 		fi
-	fi
-fi	
+	fi	
 
-####Prepare BIOS####
-if [ ! ${BIOS_NAME} = "NA" ];then
-	if [ -f ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} ]; then
-		cp -rf ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} $mods
-		show_pass_msg "Diag download OK"
-	else
-		Input_Server_Connection
+	####Prepare BIOS####
+	if [ ! ${BIOS_NAME} = "NA" ];then
 		if [ -f ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} ]; then
 			cp -rf ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} $mods
 			show_pass_msg "Diag download OK"
 		else
-			show_fail_message "Please make sure $BIOS_NAME is exsit!!!"
-			show_fail_msg "Diag download OK"
-			exit 1
+			Input_Server_Connection
+			if [ -f ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} ]; then
+				cp -rf ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} $mods
+				show_pass_msg "Diag download OK"
+			else
+				show_fail_message "Please make sure $BIOS_NAME is exsit!!!"
+				show_fail_msg "Diag download OK"
+				exit 1
+			fi
 		fi
-	fi
-else
-	show_pass_msg "Diag download OK"
-fi	
+	else
+		show_pass_msg "Diag download OK"
+	fi	
 
 }
 
 get_information()
 {
-MACHINE=$(get_config "MACHINE")
-Input_Upper_PN=$(get_config "part_number")
-current_stc_name=$(get_config "current_stc_name")
-NVFLASH_VER=$(get_config "NVFLAH_VER")
-NVINFOROM=$(get_config "NVINFOROM")
-HEAVEN_VER=$(get_config "HEAVEN")
-BIOS_NAME=$(get_config "BIOS1_NAME")
-BIOS_VER=$(get_config "BIOS1_VER")
-Input_Script=$(get_config "SCRIPT_VER")
-operator_id="`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`"
-fixture_id="`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`"
-
-if [ $current_stc_name = "CHIFLASH" ] || [ $current_stc_name = "FLA2" ];then
-	Tstation="FLA"
-elif [ $current_stc_name = "IST2" ];then
-	Tstation="IST"
-else
-	Tstation=$current_stc_name
-fi
+	MACHINE=$(get_config "MACHINE")
+	Input_Upper_PN=$(get_config "part_number")
+	current_stc_name=$(get_config "current_stc_name")
+	NVFLASH_VER=$(get_config "NVFLAH_VER")
+	NVINFOROM=$(get_config "NVINFOROM")
+	HEAVEN_VER=$(get_config "HEAVEN")
+	BIOS_NAME=$(get_config "BIOS1_NAME")
+	BIOS_VER=$(get_config "BIOS1_VER")
+	Input_Script=$(get_config "SCRIPT_VER")
+	operator_id="`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`"
+	fixture_id="`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`"
+	Input_Upper_699PN=$(get_config "699PN")
+	if [ $current_stc_name = "FLA2" ];then
+		Tstation="FLA"
+	elif [ $current_stc_name = "IST2" ];then
+		Tstation="IST"
+	elif [ $current_stc_name = "CHIFLASH" ];then
+		Tstation="CHI"	
+	else
+		Tstation=$current_stc_name
+	fi
 	
 }
 
@@ -765,11 +814,19 @@ Upload_Tester_Log()
 	cd /mnt/nv
 	if grep -q "B:65" nvflash_output.log && grep -q "B:B3" nvflash_output.log ; then
 		SIDE_STATUS="None"
-		echo "This Test Does Not Support Dual Units, Please Remove One"
+		echo "This Test Does Not Support Dual Units, Please Remove One -Gen5"
+		exit 1
+	elif grep -q "B:17" nvflash_output.log && grep -q "B:9B" nvflash_output.log ; then
+		SIDE_STATUS="None"
+		echo "This Test Does Not Support Dual Units, Please Remove One -Gen5"
 		exit 1
 	elif grep -q "B:65" nvflash_output.log ; then
 		SIDE_STATUS="LEFT"
 	elif grep -q "B:B3" nvflash_output.log ; then
+		SIDE_STATUS="RIGHT"
+	elif grep -q "B:17" nvflash_output.log ; then
+		SIDE_STATUS="LEFT"
+	elif grep -q "B:9B" nvflash_output.log ; then
 		SIDE_STATUS="RIGHT"
 	else 
 		echo "Check The Tester"
@@ -863,7 +920,8 @@ case "$STATUS" in
 		Input_Upper_Status=$service_status
 		Input_Upper_HSC=$HS_QR_CODE
 		Input_Upper_699PN=$board_699pn
-		Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Upper_SN}
+		station="FLA"
+		Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Upper_SN} $station
 		#copy rsp to cfg.ini
 		cd $mods/cfg/
 		cp ${Output_Upper_SN}.RSP cfg.ini
@@ -879,7 +937,7 @@ case "$STATUS" in
 		cd $mods
 		./rwcsv.sh
 		sleep 1
-		./FLA2.sh
+		./FLA.sh
 		Script_Output=$?
 		Upload_Tester_Log "$Script_Output" "FLA_1"
 		echo "BAT_1" > "$STATUS_FILE"
@@ -901,10 +959,10 @@ case "$STATUS" in
 		cd $mods
 		./rwcsv.sh
 		sleep 1
-		./FLA2.sh
+		./FLA.sh
 		Script_Output=$?
 		Upload_Tester_Log "$Script_Output" "FLA_2"	
-		echo "BAT_2" > "$STATUS_FILE"		
+		echo "BAT_2" > "$STATUS_FILE"
 		reboot
 		;;
 	"BAT_2")
@@ -923,8 +981,7 @@ case "$STATUS" in
 			if [[ "$response" =~ ^[Yy]$ ]]; then
 				cp -f "$STATUS_FILE" "$Tester_Logs_Path/${fixture_id}"
 				rm -f "$STATUS_FILE"
-				rm -f "$SIDE_FILE"
-				rm -f /mnt/nv/nvflash_output.log	
+				rm -f "$SIDE_FILE"	
 				echo "ABATESTER Testing Is Done"
 				echo "Call TE To Restore The Environment"
 			else			
@@ -949,7 +1006,6 @@ case "$STATUS" in
 			echo "Unknown Side: [$SIDE_COUNT]"
 			echo -e "\033[0m"			
 		fi
-# ADD GEN 5 TEST
 		;;
 	"DONE")
 		echo -ne "\033[32m"
