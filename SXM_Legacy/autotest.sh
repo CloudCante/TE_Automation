@@ -8,7 +8,7 @@
 ##
 ## Version History
 ##-------------------------------
-## Version       : 1.0.6
+## Version       : 1.0.7
 ## Release date  : 2024-03-08
 ## Revised by    : Winter Liu
 ## Description   : Initial release
@@ -17,7 +17,9 @@
 ## Add script version control 2024-05-07
 ## Add analysis Log 2024-05-22
 ## Add run mode 2024-06-15
-## change logserver IP address from 192.168.102.31 to 192.168.102.30 2024-08-06
+## add install tool function 2024-08-26
+## add new log for nvidia 2024-08-26
+## add blocking test pass but wareconn doesn't auto-pass feature
 ##**********************************************************************************
 
 [ -d "/mnt/nv/logs/" ] || mkdir /mnt/nv/logs
@@ -26,6 +28,7 @@
 [ -d "/mnt/nv/server_logs" ] || mkdir /mnt/nv/server_logs
 [ -d "/mnt/nv/mods/test" ] || mkdir /mnt/nv/mods/test
 [ -d "/mnt/nv/mods/test/cfg" ] || mkdir /mnt/nv/mods/test/cfg
+[ -d "/mnt/nv/mods/test/logs" ] || mkdir /mnt/nv/mods/test/logs
 
 export HEAVEN="/mnt/nv/HEAVEN/"
 export Diag_Path="/mnt/nv/server_diag"
@@ -49,7 +52,7 @@ declare -u station
 declare -u fixture_id
 
 
-Script_VER="1.0.6"  ###script version 2024-08-06
+Script_VER="1.0.7"  ###script version 2024-08-26
 CFG_VERSION="1.0"
 PROJECT="TESLA"
 Process_Result=""
@@ -84,10 +87,10 @@ Run_Mode=0
 
 
 ######test station list######
-list_st="FLA BAT BIT FCT FPF OQA FT FLB IST CHIFLASH" ###no need spare parts station list###
+list_st="FLA BAT BIT FCT FPF OQA FT FLB IST CHIFLASH DG5 FLC EFT" ###no need spare parts station list###
 list_stn="NVL DG3 DG4 IOT FLK"                   ###need more spare parts station list###
-single_list_stn="FLA FLB CHIFLASH IOT FLK NVL"                    ###single baord station list###
-list_st_all="CHIFLASH FLA FLB BAT BIT FCT FT FPF OQA IST NVL DG3 DG4 IOT FLK FLA2" ###ALL TEST STATION 2024-06-15
+single_list_stn="FLA FLB CHIFLASH IOT FLK NVL FLC"                    ###single baord station list###
+list_st_all="CHIFLASH FLA FLB BAT BIT FCT FT FPF OQA IST NVL DG3 DG4 DG5 IOT FLK FLA2 FLC EFT" ###ALL TEST STATION 2024-06-15
 
 #####################################################################
 #                                                                   #
@@ -311,16 +314,34 @@ if [ $? -eq 0 ]; then
 	show_fail_message "Get Data information from Wareconn Fail Please call TE"
 	exit 1
 else
-	Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"code":0,"data"://g')
-	Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/{{//g')
-	Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/}}//g')
-	Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\[//g')
-	Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\]//g')
-	Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/:/=/g')
-	Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"//g')
-	echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
-	show_pass_msg "Get Data information from wareconn!!!"
-	
+	if [ -f $mods/cfg/$1.RSP ];then
+		Fstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
+		findlog=$(find $Local_Logs/ -name "$1_${Fstation}_`date +"%Y%m%d"`*PASS.log" 2>/dev/null)
+			
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"code":0,"data"://g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/{{//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/}}//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\[//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\]//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/:/=/g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"//g')
+		echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
+		Sstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
+		if [ -n "$findlog" ] && [ "$Fstation" = "$Sstation" ];then
+			show_fail_message "$1 have pass $Fstation station but wareconn not please call TE or wareconn team!!!"
+			exit 1
+		fi
+	else
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"code":0,"data"://g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/{{//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/}}//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\[//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/\]//g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/:/=/g')
+		Input_RestAPI_Message=$(echo $Input_RestAPI_Message | sed 's/"//g')
+		echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
+		show_pass_msg "Get Data information from wareconn!!!"
+	fi
 fi
 	
 }
@@ -745,6 +766,17 @@ if [ $Run_Mode = "0" ];then ###2024-06-15
 			Upload_Log ${Scan_Upper_SN} FAIL
 			show_fail	
 		fi
+	elif [ ${current_stc_name} = "FLC" ];then
+		test_item="rwcsv FLC"
+		run_command "$test_item"
+		if [ $? -eq 0 ];then
+			Upload_Log ${Scan_Upper_SN} PASS
+			show_pass
+			show_pass_message "FLC station need poweroff and turn off/on 54v PSU as well"	
+		else
+			Upload_Log ${Scan_Upper_SN} FAIL
+			show_fail	
+		fi		
 	elif [ ${current_stc_name} = "CHIFLASH" ];then ####for clear BBX station### 2024-04-26
 		test_item="rwcsv CHIFLASH"
 		run_command "$test_item"
@@ -1049,6 +1081,7 @@ fi
 # fi	
 
 end_time=`date +"%Y%m%d_%H%M%S"`
+EndTesttime=`date +"%Y%m%d%H%M%S"`
 filename=$1_"${current_stc_name}"_"$end_time"_$2.log
 analysis_log $1
 
@@ -1247,6 +1280,7 @@ fi
 upload_start_log()
 {
     start_log_time=`date +"%Y%m%d_%H%M%S"`
+	StartTestTime=`date +"%Y%m%d%H%M%S"`
     filename="$1"_"${current_stc_name}"_"$start_log_time"_"START".log
     
 	cd $LOGFILE
@@ -1321,18 +1355,137 @@ cd $LOGFILE
 # else
 	# sta=$station
 # fi
-LogName=$(find $LOGFILE/ -name "*$1_*_${current_stc_name}*.tsg" 2>/dev/null)
-if [ -n "$LogName" ];then
-	FactoryErrorCode=$(jq -r '.[] | select(.tag == "FactoryErrorCode") | .value' "$LogName")
-	FactoryErrorMsg=$(jq -r '.[] | select(.tag == "FactoryErrorMsg") | .value' "$LogName")
-	#VBIOS_VERSION=$(jq -r '.[] | select(.tag == "VBIOS_VERSION") | .value' "$LogName")
+Input_Wareconn_Serial_Number_RestAPI_Mode_ItemInfo $1
+if [ $current_stc_name = "CHIFLASH" ];then
+	LogName=$(find $LOGFILE/ -name "*$1_*_FLA*.tsg" 2>/dev/null)
+	if [ -n "$LogName" ];then
+		FactoryErrorCode=$(jq -r '.[] | select(.tag == "FactoryErrorCode") | .value' "$LogName")
+		FactoryErrorMsg=$(jq -r '.[] | select(.tag == "FactoryErrorMsg") | .value' "$LogName")
+		HOST_MAC_ADDR=$(jq -r '.[] | select(.tag == "HOST_MAC_ADDR") | .value' "$LogName")
+		PORT_ADDRESS=$(jq -r '.[] | select(.tag == "PORT_ADDRESS") | .value' "$LogName")
+		Bin=$(jq -r '.[] | select(.tag == "Bin") | .value' "$LogName")
+		#VBIOS_VERSION=$(jq -r '.[] | select(.tag == "VBIOS_VERSION") | .value' "$LogName")
+		name=$(find -name "*$1*" -type d)
+		filenames=$(basename $name)
+		outputfile=$(find $filenames -name "output.txt" )
+		tasfile=$(find $filenames -name "tas.txt")
+		outputpath=$(pwd)/$outputfile
+		cat $tasfile > $filenames.log
+		echo "" >> $filenames.log
+		echo ""  >> $filenames.log
+		echo "file:$outputpath" >> $filenames.log
+		echo ""  >> $filenames.log
+		cat $outputfile >> $filenames.log
+		echo ""  >> $filenames.log
+		echo ""  >> $filenames.log
+		
+		echo "$Eboard:$Eboard_SN" >> $filenames.log ##from wareconn
+		echo "" >> $filenames.log
+		echo "Factory Information" >> $filenames.log
+		echo "Monitor SN:" >> $filenames.log ##??
+		echo "HardDisk SN:" >> $filenames.log ##??
+		echo "HardDisk Health:N/A" >> $filenames.log
+		echo "Power-On Time Count:" >> $filenames.log ##??
+		echo "Drive Power Cycle Count:" >> $filenames.log ##??
+		echo "CPUID:`dmidecode -t 4 | grep "ID" | awk -F ':' '{print $2}'`" >> $filenames.log 
+		echo "Brand String: `dmidecode -t 4 | grep "Version" | awk -F ':' '{print $2}'` " >> $filenames.log 
+		echo "Mac Address:$HOST_MAC_ADDR" >> $filenames.log ##from tsg log
+		echo "DiagVer:${diag_name}" >> $filenames.log
+		echo "PCIE Riser Card ID:NONE" >> $filenames.log ##??
+		echo "BrdSN:$1" >> $filenames.log
+		echo "FLAT ID:`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`" >> $filenames.log
+		echo "Routing:${current_stc_name}" >> $filenames.log
+		echo "FOX_Routing:${current_stc_name}" >> $filenames.log
+		echo "PN:${Input_Upper_PN}" >> $filenames.log
+		echo "BIOS:$BIOS_VER" >> $filenames.log
+		echo "BIN:$Bin" >> $filenames.log ##??
+		echo "Error Code:$FactoryErrorCode" >> $filenames.log ##use factory error code 
+		echo "StartTestTime:$StartTestTime" >> $filenames.log
+		echo "EndTesttime:$EndTesttime" >> $filenames.log
+		echo "Operator:`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`" >> $filenames.log
+		echo "System Ver:`cat /etc/centos-release`" >> $filenames.log 
+		echo "SFC:YES" >> $filenames.log
+		echo "PortWell-B SN:`dmidecode -t 1 | grep "Serial Number" | awk -F ':' '{print $2}'`" >> $filenames.log ##ipmitool 
+		echo "Hotplug Status:YES" >> $filenames.log ##TJ all testers enable Hotplug
+		echo "0SN_From_SCAN,,relates_slots,$PORT_ADDRESS" >> $filenames.log ##from tsg log
+		echo "0SN_From_SCAN,,relates_slots,$PORT_ADDRESS" >> $filenames.log ##from tsg log
+		echo "QR_CODE: N/A" >> $filenames.log ##??
+		echo "HS_QR_CODE:$HS_QR_CODE" >> $filenames.log ##??
+		echo "" >> $filenames.log
+		echo "" >> $filenames.log
+		echo "****END****" >> $filenames.log
+	else
+		show_fail_message "Can't find the analysis Log"
+	fi	
 else
-	show_fail_message "Can't find the analysis Log"
-fi
+		
+	LogName=$(find $LOGFILE/ -name "*$1_*_${current_stc_name}*.tsg" 2>/dev/null)
+	if [ -n "$LogName" ];then
+		FactoryErrorCode=$(jq -r '.[] | select(.tag == "FactoryErrorCode") | .value' "$LogName")
+		FactoryErrorMsg=$(jq -r '.[] | select(.tag == "FactoryErrorMsg") | .value' "$LogName")
+		HOST_MAC_ADDR=$(jq -r '.[] | select(.tag == "HOST_MAC_ADDR") | .value' "$LogName")
+		PORT_ADDRESS=$(jq -r '.[] | select(.tag == "PORT_ADDRESS") | .value' "$LogName")
+		Bin=$(jq -r '.[] | select(.tag == "Bin") | .value' "$LogName")
+		#VBIOS_VERSION=$(jq -r '.[] | select(.tag == "VBIOS_VERSION") | .value' "$LogName")
+		name=$(find -name "*$1*" -type d)
+		filenames=$(basename $name)
+		outputfile=$(find $filenames -name "output.txt" )
+		tasfile=$(find $filenames -name "tas.txt")
+		outputpath=$(pwd)/$outputfile
+		cat $tasfile > $filenames.log
+		echo "" >> $filenames.log
+		echo ""  >> $filenames.log
+		echo "file:$outputpath" >> $filenames.log
+		echo ""  >> $filenames.log
+		cat $outputfile >> $filenames.log
+		echo ""  >> $filenames.log
+		echo ""  >> $filenames.log
+		
+		echo "$Eboard:$Eboard_SN" >> $filenames.log ##from wareconn
+		echo "" >> $filenames.log
+		echo "Factory Information" >> $filenames.log
+		echo "Monitor SN:" >> $filenames.log ##??
+		echo "HardDisk SN:" >> $filenames.log ##??
+		echo "HardDisk Health:N/A" >> $filenames.log
+		echo "Power-On Time Count:" >> $filenames.log ##??
+		echo "Drive Power Cycle Count:" >> $filenames.log ##??
+		echo "CPUID:`dmidecode -t 4 | grep "ID" | awk -F ':' '{print $2}'`" >> $filenames.log 
+		echo "Brand String: `dmidecode -t 4 | grep "Version" | awk -F ':' '{print $2}'` " >> $filenames.log 
+		echo "Mac Address:$HOST_MAC_ADDR" >> $filenames.log ##from tsg log
+		echo "DiagVer:${diag_name}" >> $filenames.log
+		echo "PCIE Riser Card ID:NONE" >> $filenames.log ##??
+		echo "BrdSN:$1" >> $filenames.log
+		echo "FLAT ID:`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`" >> $filenames.log
+		echo "Routing:${current_stc_name}" >> $filenames.log
+		echo "FOX_Routing:${current_stc_name}" >> $filenames.log
+		echo "PN:${Input_Upper_PN}" >> $filenames.log
+		echo "BIOS:$BIOS_VER" >> $filenames.log
+		echo "BIN:$Bin" >> $filenames.log ##??
+		echo "Error Code:$FactoryErrorCode" >> $filenames.log ##use factory error code 
+		echo "StartTestTime:$StartTestTime" >> $filenames.log
+		echo "EndTesttime:$EndTesttime" >> $filenames.log
+		echo "Operator:`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`" >> $filenames.log
+		echo "System Ver:`cat /etc/centos-release`" >> $filenames.log 
+		echo "SFC:YES" >> $filenames.log
+		echo "PortWell-B SN:`dmidecode -t 1 | grep "Serial Number" | awk -F ':' '{print $2}'`" >> $filenames.log ##ipmitool 
+		echo "Hotplug Status:YES" >> $filenames.log ##TJ all testers enable Hotplug
+		echo "0SN_From_SCAN,,relates_slots,$PORT_ADDRESS" >> $filenames.log ##from tsg log
+		echo "0SN_From_SCAN,,relates_slots,$PORT_ADDRESS" >> $filenames.log ##from tsg log
+		echo "QR_CODE: N/A" >> $filenames.log ##??
+		echo "HS_QR_CODE:$HS_QR_CODE" >> $filenames.log ##??
+		echo "" >> $filenames.log
+		echo "" >> $filenames.log
+		echo "****END****" >> $filenames.log
+	
+	else
+		show_fail_message "Can't find the analysis Log"
+	fi
+fi	
+
 
 }
 
-#####################
+####install tool
 update()
 {
 
@@ -1360,6 +1513,64 @@ fi
 }
 
 
+#####################################
+Input_Wareconn_Serial_Number_RestAPI_Mode_ItemInfo()
+{
+
+station_name=""
+Eboard_SN=""
+Eboard=""
+HS_QR_CODE=""
+
+
+###API
+
+####TJAPI###############################
+TID="client_id=NocHScsf53aqE"
+TSECRET="client_secret=f8d6b0450c2a2af273a26569cdb0de04"
+####NCAPI###############################
+ID="client_id=vE7BhzDJhqO"
+SECRET="client_secret=0f40daa800fd87e20e0c6a8230c6e28593f1904c7edfaa18cbbca2f5bc9272b5"
+########################################
+TYPE="grant_type=client_credentials"
+furl="http://$NC_API_IP/api/v1/Oauth/token"
+iurl="http://$NC_API_IP/api/v1/ItemInfo/get"
+##get_token#############################
+
+echo "get token from wareconn API"
+Input_RestAPI_Message=$(curl -X GET "$NC_API_IP/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
+echo $Input_RestAPI_Message | grep "success"  > /dev/null
+if [ $? -eq 0 ]; then
+	token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
+	show_pass_message "get_token successful:$token"	
+else
+	show_fail_message "$Input_RestAPI_Message"
+	show_fail_message "API connection Fail Please check net cable or call TE"
+	exit 1
+fi
+
+##get_information from wareconn#########
+echo "get test information from wareconn API "
+Input_RestAPI_Message=$(curl -X GET "$iurl" -H "content-type: application/json" -H "Authorization: Bearer "$token"" -d '{"serial_number":'"$1"'}') ####add parameters type 2024-05-07 
+#echo $Input_RestAPI_Message
+#pause
+if echo "$Input_RestAPI_Message" | jq -e '.msg == "success"' > /dev/null; then
+	station_name=$(echo "$Input_RestAPI_Message" | jq -r '.list.now_stn')
+	Eboard_SN=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_serial_number')
+	Eboard=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_name')
+	HS_QR_CODE=$(echo "$Input_RestAPI_Message" | jq -r '.list.assy_records[-1].serial_number')
+	#part_number=$(echo "$Input_RestAPI_Message" | jq -r '.list.part_number')
+	
+	
+else	
+	show_fail_message "$Input_RestAPI_Message"
+	show_fail_message "Get Data information from Wareconn Fail Please call TE"
+	exit 1
+fi	
+
+
+}
+
 #############################################################################################################
 #############################################################################################################
 ####Main Part####
@@ -1369,7 +1580,7 @@ fi
 
 rm -rf $LOGFILE/*
 echo "" > /var/log/message
-sleep 20
+sleep 80
 if [ ! -f $OPID ];then
 	Input_Server_Connection
 fi
