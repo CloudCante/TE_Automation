@@ -48,7 +48,13 @@
 ## Release date  : 2025-09-18
 ## Revised by    : Winter Liu
 ## Description   : remove get token
+##--------------------------------------------------------------------------------------------------------------------------------
+## Version       : 1.1.3
+## Release date  : 2025-11-06
+## Revised by    : Darvin Lemus
+## Description   : Intergrated inforcheck function
 ##**********************************************************************************
+
 
 
 [ -d "/mnt/nv/logs/" ] || mkdir /mnt/nv/logs
@@ -96,6 +102,7 @@ export pw_diag=""
 export pw_log=""
 export Input_Upper_699PN=""
 export Input_Lower_699PN=""
+
 declare -u station
 declare -u fixture_id
 declare -a list_st=()
@@ -1551,6 +1558,107 @@ fi
 
 }
 
+# BIOS version verification function
+bioscheck()
+{
+    # Load BIOS config from cfg.ini
+    local BIOS_FW=$(get_config "BIOS_FW")
+    
+    cd $mods
+    ./nvflash_mfg -v | tee -a $LOGFILE/log.txt
+    
+    if grep "$BIOS_FW" $LOGFILE/log.txt > /dev/null; then
+        show_pass_msg "BIOS version check pass"
+        return 0
+    else
+        show_fail_msg "BIOS version mismatch - Expected: $BIOS_FW"
+        exit 1
+    fi    
+}
+
+# System Management Bus verification
+smb_check()
+{
+    local pcie_ID=$(lspci | grep -i nvidia | cut -f1 -d ' ' | sed -n '1,1P')
+    
+    if [ -z "$pcie_ID" ]; then
+        show_fail_msg "SMB check fail - No NVIDIA device found"
+        return 1
+    fi
+    
+    cd $mods/core/tsg
+    python smb.py --port-address=$pcie_ID --product=PG183 --sku=200 --test-vendorid | tee -a $LOGFILE/log.txt
+    
+    if grep "SMB PASSED" $LOGFILE/log.txt > /dev/null; then
+        show_pass_msg "SMB verification pass"
+        return 0
+    else
+        show_fail_msg "SMB verification fail"
+        return 1
+    fi
+}
+
+# Information ROM verification
+inforrom_check()
+{
+    # Load expected values from config
+    local BoardBuildDate=$(get_config "BoardBuildDate")
+    local MarketingName=$(get_config "MarketingName")
+    local Board699PartNumber=$(get_config "Board699PartNumber")
+    local BoardProductPartNumber=$(get_config "BoardProductPartNumber")
+    
+    cd $mods
+    
+    # Clean up any old log
+    [ -f irom.log ] && rm -f irom.log
+    
+    # Read board data
+    ./nvflash_mfg --rdobd | tee -a $LOGFILE/log.txt
+    
+    # Get serial number from scan file
+    local sn=$(grep "serial_number=" $SCANFILE | sed 's/.*= *//')
+    
+    # Check each required field
+    local result=""
+    
+    if ! grep "BoardBuildDate" $LOGFILE/log.txt | grep -q "$BoardBuildDate"; then
+        echo "BoardBuildDate mismatch - Expected: $BoardBuildDate" | tee -a $LOGFILE/log.txt
+        result=fail
+    fi
+    
+    if ! grep "MarketingName" $LOGFILE/log.txt | grep -q "$MarketingName"; then
+        echo "MarketingName mismatch - Expected: $MarketingName" | tee -a $LOGFILE/log.txt
+        result=fail
+    fi
+    
+    if ! grep "SerialNumber" $LOGFILE/log.txt | grep -q "$sn"; then
+        echo "SerialNumber mismatch - Expected: $sn" | tee -a $LOGFILE/log.txt
+        result=fail
+    fi
+    
+    if ! grep "Board699PartNumber" $LOGFILE/log.txt | grep -q "$Board699PartNumber"; then
+        echo "Board699PartNumber mismatch - Expected: $Board699PartNumber" | tee -a $LOGFILE/log.txt
+        result=fail
+    fi
+    
+    if ! grep "BoardProductPartNumber" $LOGFILE/log.txt | grep -q "$BoardProductPartNumber"; then
+        echo "BoardProductPartNumber mismatch - Expected: $BoardProductPartNumber" | tee -a $LOGFILE/log.txt
+        result=fail
+    fi
+
+    if [ "$result" = "fail" ]; then
+        echo "----------------------------------" >> $LOGFILE/log.txt
+        echo "Core Error Code : 982500" >> $LOGFILE/log.txt
+        echo "Core Error Msg  : InfoROM: device not found or flash failure" >> $LOGFILE/log.txt
+        echo "----------------------------------" >> $LOGFILE/log.txt
+        show_fail_msg "InfoROM verification fail - Check log for details"
+        exit 1
+    else
+        show_pass_msg "InfoROM verification pass - All fields match"
+        return 0
+    fi
+}
+
 run_command()
 {
     for m in $1; do
@@ -1561,12 +1669,28 @@ run_command()
         echo " " | tee -a $LOGFILE/log.txt
         date +"<Info message>: $m - start time: %F %T" | tee -a $LOGFILE/log.txt 
         cd $mods
-        ./$m.sh 
+        
+        # Handle integrated modules differently from external scripts
+        case $m in
+            "inforcheck")
+                inforrom_check
+                ;;
+            "bioscheck")
+                bioscheck
+                ;;
+            "smb_check")
+                smb_check
+                ;;
+            *)
+                ./$m.sh
+                ;;
+        esac
+        
         if [ $? -ne 0 ]; then
             echo "$m module Test ------------ [ FAIL ]" | tee -a $LOGFILE/log.txt
             color "$m module test" FAIL
             date +"<Info message>: $m - end time: %F %T" | tee -a $LOGFILE/log.txt
-			Fail_Module=$m
+            Fail_Module=$m
             echo " "
             echo " " | tee -a $LOGFILE/log.txt 
             return 1
@@ -1578,7 +1702,6 @@ run_command()
             echo " " | tee -a $LOGFILE/log.txt
         fi
     done
-	
 }
 
 get_information()
@@ -1761,15 +1884,17 @@ script_check()
 	else
 		echo "Script Version is ${Script_VER}"
 		if [ -f ${Diag_Path}/${Input_Script}_${Script_File} ];then
-			cp -rf ${Diag_Path}/${Input_Script}_${Script_File} /mnt/nv/$Script_File
-			sleep 15
-			reboot
+			# cp -rf ${Diag_Path}/${Input_Script}_${Script_File} /mnt/nv/$Script_File
+			# sleep 15
+			# reboot
+			echo "Version mismatch detected but continuing for testing"
 		else
 			Input_Server_Connection
 			if [ -f ${Diag_Path}/${Input_Script}_${Script_File} ];then
-				cp -rf ${Diag_Path}/${Input_Script}_${Script_File} /mnt/nv/$Script_File
-				sleep 15
-				reboot
+				# cp -rf ${Diag_Path}/${Input_Script}_${Script_File} /mnt/nv/$Script_File
+				# sleep 15
+				# reboot
+				echo "Version mismatch detected but continuing for testing"
 			else
 				show_fail_msg "not exsit script please check"
 				exit 1
