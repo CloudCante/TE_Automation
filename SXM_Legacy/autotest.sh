@@ -8,7 +8,7 @@
 ##
 ## Version History
 ##-------------------------------
-## Version       : 1.0.8
+## Version       : 1.0.9
 ## Release date  : 2024-03-08
 ## Revised by    : Winter Liu
 ## Description   : Initial release
@@ -21,7 +21,35 @@
 ## add new log for nvidia 2024-08-26
 ## add blocking test pass but wareconn doesn't auto-pass feature
 ## add upload result to LF API 2024-11-08
+## add capture "ctrl+c" abnormal signal to terminate the test and delete local diag to prevent misjudgment 2024-12-14
+##--------------------------------------------------------------------------------------------------------------------------------
+## Version       : 1.1.0
+## Release date  : 2025-04-21
+## Revised by    : Winter Liu
+## Description   : 1.Adding a warning message 2.Adding check station function 3.Adding TPC station 
+## Description   : 4.list station from ini file 
+##--------------------------------------------------------------------------------------------------------------------------------
+## Version       : 1.1.1
+## Release date  : 2025-05-26
+## Revised by    : Winter Liu
+## Description   : 1.change URL form http://$API_IP to https://$API_IP:4443; 2.check script md5sum value
+##--------------------------------------------------------------------------------------------------------------------------------
+## Version       : 1.1.1
+## Release date  : 2025-09-17
+## Revised by    : Winter Liu
+## Description   : add retry api function
+##--------------------------------------------------------------------------------------------------------------------------------
+## Version       : 1.1.2
+## Release date  : 2025-09-18
+## Revised by    : Winter Liu
+## Description   : CHIFLASH change diag
+##--------------------------------------------------------------------------------------------------------------------------------
+## Version       : 1.1.2
+## Release date  : 2025-09-18
+## Revised by    : Winter Liu
+## Description   : remove get token
 ##**********************************************************************************
+
 
 [ -d "/mnt/nv/logs/" ] || mkdir /mnt/nv/logs
 [ -d "/mnt/nv/HEAVEN/" ] || mkdir /mnt/nv/HEAVEN/
@@ -47,14 +75,37 @@ export NC_diagserver_IP="192.168.102.21"
 export NC_API_IP="192.168.102.20"
 export TJ_API_IP="10.67.240.77"
 export OPID="$Diag_Path/OPID/OPID.ini"  ###add check operator ID 4/4/2024####
+export INI_folder="$Diag_Path/INI/"
 export Script_File="autotest.sh"
+export site="NC"
+export logserver_IP=""
+export diagserver_IP=""
+export API_IP=""
+export ID=""
+export SECRET=""
+export TID="client_id=NocHScsf53aqE"
+export TSECRET="client_secret=f8d6b0450c2a2af273a26569cdb0de04"
+export NID="client_id=vE7BhzDJhqO"
+export NSECRET="client_secret=0f40daa800fd87e20e0c6a8230c6e28593f1904c7edfaa18cbbca2f5bc9272b5"
+export TYPE="grant_type=client_credentials"
+export TJ_pw_diag="TJ77921~"
+export TJ_pw_log="NVD77921~"
+export NC_pw_diag="TJ77921~"
+export NC_pw_log="TJ77921~"
+export pw_diag=""
+export pw_log=""
+export Input_Upper_699PN=""
+export Input_Lower_699PN=""
 declare -u station
-#declare -u operator_id
 declare -u fixture_id
+declare -a list_st=()
+declare -a list_stn=()
+declare -a single_list_stn=()
+declare -a list_st_all=()
 
 
-Script_VER="1.0.8"  ###script version 2024-11-08
-CFG_VERSION="1.0.8"
+Script_VER="1.1.2"  
+CFG_VERSION="1.1.2"
 PROJECT="TESLA"
 Process_Result=""
 Input_Upper_SN=""
@@ -94,14 +145,17 @@ Input_Upper_Eboard=""
 Input_Upper_Status=""
 Input_Upper_HSC=""
 Tstation=""
+Output_Upper_699PN=""
+Output_Lower_699PN=""
 cont="true"
 
 
+
 ######test station list######
-list_st="FLA BAT BIT FCT FPF OQA FT FLB IST CHIFLASH DG5 FLC IST2 EFT ZPI FLA2" ###no need spare parts station list###
-list_stn="NVL DG3 DG4 IOT FLK"                   ###need more spare parts station list###
-single_list_stn="FLA FLB CHIFLASH IOT FLK NVL FLC FLA2"                    ###single baord station list###
-list_st_all="CHIFLASH FLA FLB BAT BIT FCT FT FPF OQA IST NVL DG3 DG4 DG5 IOT FLK FLA2 FLC IST2 EFT ZPI" ###ALL TEST STATION 2024-06-15
+#list_st="FLA BAT BIT FCT FPF OQA FT FLB IST CHIFLASH DG5 FLC IST2 EFT ZPI FLA1 FLA2 ORT ORN TPC" ###no need spare parts station list###
+#list_stn="NVL DG3 DG4 IOT FLK"                   ###need more spare parts station list###
+#single_list_stn="FLA FLB CHIFLASH IOT FLK NVL FLC FLA2 TPC"                    ###single baord station list###
+#list_st_all="CHIFLASH FLA FLB BAT BIT FCT FT FPF OQA IST NVL DG3 DG4 DG5 IOT FLK FLA1 FLA2 FLC IST2 EFT ZPI ORT ORN TPC" ###ALL TEST STATION 2024-06-15
 
 #####################################################################
 #                                                                   #
@@ -223,6 +277,19 @@ show_fail_message()
      echo
 }
 
+######################################################################
+#                                                                    #
+# Show Warning message (color: yellow)                                     #
+#                                                                    #
+######################################################################
+show_warning_message()
+{ 
+     tput bold
+     TEXT=$1
+     echo -ne "\033[33m$TEXT \033[0m"
+	 echo 
+}
+
 #####################################################################
 #                                                                   #
 # Show PASS                                                         #
@@ -263,7 +330,6 @@ show_fail()
 {
  
 	echo
-	echo
 	show_fail_message "############################################################################"
 	show_fail_message "Start time              :$start_time"
 	show_fail_message "End time                :$(date '+%F %T')"
@@ -278,11 +344,50 @@ show_fail()
 	show_fail_message "Status                  :FAIL"
 	show_fail_message "############################################################################"
 	echo 
-	echo 
-	echo 
-	echo
+
 	
 }
+#################capture "ctrl+c"############################################
+function trap_ctrlc()
+{
+	# perform cleanup here 2024-12-14
+
+	echo -e ""
+	echo -e ""
+	echo -e "\033[47;30m\033[05m	LINE No: ${LINENO}	Ctrl-C caught ...	\033[0m"
+	echo -e ""
+	echo -e ""
+if [ -n "${diag_VER}" ];then
+	if [ $mods/$diag_VER ];then
+		rm -rf $mods/$diag_VER
+		echo "delete local diag $diag_VER complete"
+	fi
+fi	
+
+	exit 1
+}
+trap "trap_ctrlc" 2
+
+############################################################################
+
+
+# 从文件加载数据到数组
+load_array_from_file() 
+{
+
+    local arr_ref=$1  
+    local file=$2
+    
+    if [ ! -f "${INI_folder}/$file" ]; then
+        echo "make sure $file is exist please check diag server"
+        exit 1
+    fi
+    
+    eval "$arr_ref=()"
+    
+   mapfile -t arr_ref < "${INI_folder}/$file" 2>/dev/null  
+}
+
 ####get information from wareconn####################################
 Input_Wareconn_Serial_Number_RestAPI_Mode()
 {
@@ -290,39 +395,85 @@ Input_Wareconn_Serial_Number_RestAPI_Mode()
 
 now_stn=""
 Input_RestAPI_Message=""
-####TJAPI###############################
-TID="client_id=NocHScsf53aqE"
-TSECRET="client_secret=f8d6b0450c2a2af273a26569cdb0de04"
-####NCAPI###############################
-ID="client_id=vE7BhzDJhqO"
-SECRET="client_secret=0f40daa800fd87e20e0c6a8230c6e28593f1904c7edfaa18cbbca2f5bc9272b5"
-########################################
-TYPE="grant_type=client_credentials"
-furl="http://$NC_API_IP/api/v1/Oauth/token"
-surl="http://$NC_API_IP/api/v1/test-profile/get"
-turl="http://$NC_API_IP/api/v1/Station/get"
 ##get_token#############################
 
-echo "get token from wareconn API"
-Input_RestAPI_Message=$(curl -X GET "$NC_API_IP/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
-if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-	token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
-	show_pass_message "get_token successful:$token"	
-else
-	show_fail_message "$Input_RestAPI_Message"
-	show_fail_message "get token Fail Please check net cable or call TE"
-	exit 1
-fi
+# echo "get token from wareconn API"
+# max_attempts=3
+# attempt=1
+# sleep_time=5
+# timeout=60
+# while [ $attempt -le $max_attempts ]; do
+    # show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+    # Input_RestAPI_Message=$(curl -m 60 -k "https://$API_IP:443/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
+    # curl_exit_code=$?
+
+    # if [ $curl_exit_code -eq 0 ]; then
+        # break
+    # fi
+
+    # if [ $attempt -lt $max_attempts ]; then
+        # sleep $sleep_time
+    # fi
+
+    # ((attempt++))
+# done
+
+# if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+	# token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
+	# show_pass_message "get_token successful:$token"	
+# else
+	# show_fail_message "$Input_RestAPI_Message"
+	# show_fail_message "get token Fail Please check net cable or call TE"
+	# exit 1
+# fi
 
 
 ##get_information from wareconn#########
 echo "get test information from wareconn API "
 	if [ $Run_Mode = 0 ];then
-		Input_RestAPI_Message=$(curl -X GET "$surl" -H "content-type: application/json" -H "Authorization: Bearer "$token"" -d '{"serial_number":'"$1"',"type":"war,sta"}') ####add parameters type 2024-05-07
+		max_attempts=3
+		attempt=1
+		sleep_time=5
+		timeout=60
+		while [ $attempt -le $max_attempts ]; do
+			show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."
+			
+			Input_RestAPI_Message=$(curl -m 60 -k "$surl?serial_number=$1&type=war,sta")
+			curl_exit_code=$?
+
+			if [ $curl_exit_code -eq 0 ]; then
+				break
+			fi
+
+			if [ $attempt -lt $max_attempts ]; then
+				sleep $sleep_time
+			fi
+
+			((attempt++))
+		done
 	else
-		Input_RestAPI_Message=$(curl -X GET "$surl?serial_number=$1&type=stc&stc_name=$2" -H "content-type: application/json" -H "Authorization: Bearer "$token"")
+		max_attempts=3
+		attempt=1
+		sleep_time=5
+		timeout=60
+		while [ $attempt -le $max_attempts ]; do
+			show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."
+			
+			Input_RestAPI_Message=$(curl -m 60 -k "$surl?serial_number=$1&type=stc&stc_name=$2")
+			curl_exit_code=$?
+
+			if [ $curl_exit_code -eq 0 ]; then
+				break
+			fi
+
+			if [ $attempt -lt $max_attempts ]; then
+				sleep $sleep_time
+			fi
+
+			((attempt++))
+		done	
 	fi
-if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
 	if [ -f $mods/cfg/$1.RSP ] && [ "$Run_Mode" = "0" ];then
 		Fstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
 		findlog=$(find $Local_Logs/ -name "$1_${Fstation}_`date +"%Y%m%d"`*PASS.log" 2>/dev/null)
@@ -337,7 +488,8 @@ if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
 		echo "$Input_RestAPI_Message" | awk -F ',' '{ for (i=1; i<=NF; i++) print $i }' > $mods/cfg/$1.RSP
 		Sstation=$(echo $(cat $mods/cfg/$1.RSP | grep "^current_stc_name" | awk -F '=' '{print$2}'))
 		if [ -n "$findlog" ] && [ "$Fstation" = "$Sstation" ];then
-			show_fail_message "$1 have pass $Fstation station but wareconn not please call TE or wareconn team!!!"
+			show_fail_message "$1 have pass $Fstation station but wareconn not please wait a minute and retest"
+			show_fail_message "if still not pass next station please call TE or wareconn team!!!"
 			exit 1
 		else
 			show_pass_msg "$1 Get test information from wareconn!!!"
@@ -357,6 +509,7 @@ else
 	show_fail_message "$Input_RestAPI_Message"
 	show_fail_message "$1 Get test information from Wareconn Fail Please call TE"
 	exit 1
+
 fi
 	
 }
@@ -368,7 +521,7 @@ echo -e "\033[33m	Network Contacting : $Diag_Path	, Wait .....	\033[0m"
 while true
 	do
 		umount $Diag_Path >/dev/null 2>&1
-		mount -t cifs -o username=administrator,password=TJ77921~ //$NC_diagserver_IP/e/current $Diag_Path
+		mount -t cifs -o username=administrator,password=$pw_diag //$diagserver_IP/e/current $Diag_Path
 		if [ $? -eq 0 ];then
 			break
 		fi	
@@ -380,7 +533,7 @@ echo -e "\033[33m	Network Contacting : $Logs_Path	, Wait .....	\033[0m"
 while true
 	do
 		umount $Logs_Path >/dev/null 2>&1
-		mount -t cifs -o username=administrator,password=TJ77921~ //$NC_logserver_IP/d $Logs_Path
+		mount -t cifs -o username=administrator,password=$pw_log //$logserver_IP/d $Logs_Path
 		if [ $? -eq 0 ];then
 			break
 		fi	
@@ -416,7 +569,7 @@ Output_Scan_Infor()
 				read -p " $num. Scan Operator ID:" operator_id
 			fi
 			if grep -q "^$operator_id$" $OPID ; then
-				if [ -n "$operator_id" ];then
+				if [ $(expr length $operator_id) -eq 8 ] || [ -n "$operator_id" ];then
 					status=1
 				else
 					flg=1
@@ -508,19 +661,27 @@ Output_Scan_Infor()
 Read_SN()
 
 {
-if [ ! -f "nvflash_mfg" ];then
+if [ ! -f "nvflash_mfg" ] || [ ! -f "uutself.cfg.env" ];then
 	Input_Server_Connection
-	cp $Diag_Path/nvflash_mfg ./
-	[ ! -f "uutself.cfg.env" ] && cp $Diag_Path/uutself.cfg.env ./
+	if [ -f $Diag_Path/nvflash_mfg ] && [ -f $Diag_Path/uutself.cfg.env ];then
+		cp $Diag_Path/nvflash_mfg ./
+		[ ! -f "uutself.cfg.env" ] && cp $Diag_Path/uutself.cfg.env ./
+	else
+		show_warning_message "Please call TE to check diag server, nvflash_mfg or uutself.cfg.env is not exist"
+		exit 1
+	fi	
 fi
+	
 
-counts=$(lspci | grep NV | wc -l)
+counts=$(./nvflash_mfg -A -a | grep "10DE" | wc -l)
 
 if [ $counts = "2" ]; then
 	port1=$(lspci | grep NV | head -n 1 | awk '{ print $1 }')
 	port2=$(lspci | grep NV | tail -n 1 | awk '{ print $1 }')
 	Output_Upper_SN=$(./nvflash_mfg -B $port1  --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+	Output_Upper_699PN=$(./nvflash_mfg -B $port1  --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
 	Output_Lower_SN=$(./nvflash_mfg -B $port2  --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+	Output_Lower_699PN=$(./nvflash_mfg -B $port2  --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
 	if [ -z ${Output_Upper_SN} ] && [ -z ${Output_Lower_SN} ]; then
 		show_fail_msg "Read SN error Please check!!!"
 		exit 1
@@ -532,6 +693,7 @@ if [ $counts = "2" ]; then
 	fi
 elif [ $counts = "1" ]; then
 	Output_Upper_SN=$(./nvflash_mfg --rdobd | grep -m 1 'BoardSerialNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+	Output_Upper_699PN=$(./nvflash_mfg --rdobd | grep -m 1 'Board699PartNumber' | awk -F ':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
 	if [ -z ${Output_Upper_SN} ]; then
 		show_fail_msg "Read SN error Please check!!!"
 		exit 1
@@ -541,9 +703,16 @@ elif [ $counts = "1" ]; then
 		testqty="1"	
 	fi
 else
-	show_fail_message "Can't Detect Cards Please Inserd one Card"
-	show_fail_msg "Read SN FAIL"
-	exit 1 	
+	Output_Upper_SN=$(printf $(python3 aardvark/aai2c_fru_eeprom.py 0 400 read 0x50 0x00 256 | cut -d ":" -f 2 | tail -n +5 | xargs | sed 's/ / \\x/ g'| sed 's/^/\\x/' | tr -d " " ) | LC_ALL=C sed 's/[^ -~]/ /g' | xargs -0 | tr ' ' '\n' | awk '$1 ~ /[0-9]{13}/{print $1}' | tail -n -1 )
+	if [ -n "$Output_Upper_SN" ];then
+		show_pass_message "######SerialNumber1:$Output_Upper_SN######"
+		show_pass_msg "Read SN OK"
+		testqty="1"
+	else	
+		show_fail_message "Can't Detect Cards Please Inserd one Card"
+		show_fail_msg "Read SN FAIL"
+		exit 1
+	fi	
 	
 fi
 
@@ -557,29 +726,14 @@ DownLoad()
 #####Prepare diag######
 cd $mods 
 ls | grep -v cfg | xargs rm -fr
-if [ -d ${Diag_Path}/${MACHINE}/${diag_name} ]; then
-#if [ -d ${Diag_Path}/${Input_Upper_PN}/${diag_name} ]; then
-	show_pass_message "DownLoad Diag From Server Please Waiting ..."
-	#echo "${diag_VER}"
-	#pause
-	#cp -rf ${Diag_Path}/${Input_Upper_PN}/${diag_name}/* $mods
-	cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
-	cd $mods
-	tar -xf ${diag_VER} 
-	if [ $? -ne 0 ];then
-		show_fail_message "Please make sure exist diag zip files"
-		show_fail_msg "DownLoad Diag FAIL"
-		exit 1
-	fi	
-	#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* 
-	
-else
-	Input_Server_Connection
+if [ -n "${diag_name}" ];then
 	if [ -d ${Diag_Path}/${MACHINE}/${diag_name} ]; then
 	#if [ -d ${Diag_Path}/${Input_Upper_PN}/${diag_name} ]; then
 		show_pass_message "DownLoad Diag From Server Please Waiting ..."
-		cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
+		#echo "${diag_VER}"
+		#pause
 		#cp -rf ${Diag_Path}/${Input_Upper_PN}/${diag_name}/* $mods
+		cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
 		cd $mods
 		tar -xf ${diag_VER} 
 		if [ $? -ne 0 ];then
@@ -587,13 +741,33 @@ else
 			show_fail_msg "DownLoad Diag FAIL"
 			exit 1
 		fi	
-		#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* ./
+		#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* 
+		
 	else
-		show_fail_message "Diag isn't exist Please Call TE"
-		show_fail_msg "DownLoad Diag FAIL"
-		exit 1
-	fi	
-fi
+		Input_Server_Connection
+		if [ -d ${Diag_Path}/${MACHINE}/${diag_name} ]; then
+		#if [ -d ${Diag_Path}/${Input_Upper_PN}/${diag_name} ]; then
+			show_pass_message "DownLoad Diag From Server Please Waiting ..."
+			cp -rf ${Diag_Path}/${MACHINE}/${diag_name}/* $mods
+			#cp -rf ${Diag_Path}/${Input_Upper_PN}/${diag_name}/* $mods
+			cd $mods
+			tar -xf ${diag_VER} 
+			if [ $? -ne 0 ];then
+				show_fail_message "Please make sure exist diag zip files"
+				show_fail_msg "DownLoad Diag FAIL"
+				exit 1
+			fi	
+			#cp  ${Diag_Path}/${MACHINE}/${NVFLAH_VER}/* ./
+		else
+			show_fail_message "Diag isn't exist Please Call TE"
+			show_fail_msg "DownLoad Diag FAIL"
+			exit 1
+		fi	
+	fi
+else
+	show_warning_message "diag_name is null, please call TE to check the wareconn settings"
+	exit 1
+fi	
 #####Prepare HEAVEN#####
 if [ ! $HEAVEN_VER = "NA" ];then	
 	if [ -f $HEAVEN/$HEAVEN_VER ];then
@@ -692,20 +866,24 @@ fi
 # fi	
 
 ####Prepare BIOS####
-if [ -f ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} ]; then
-	cp -rf ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} $mods
-	show_pass_msg "Diag download OK"
-else
-	Input_Server_Connection
+if [ ! ${BIOS_NAME} = "NA" ];then
 	if [ -f ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} ]; then
 		cp -rf ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} $mods
 		show_pass_msg "Diag download OK"
 	else
-		show_fail_message "Please make sure $BIOS_NAME is exsit!!!"
-		show_fail_msg "Diag download OK"
-		exit 1
+		Input_Server_Connection
+		if [ -f ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} ]; then
+			cp -rf ${Diag_Path}/${MACHINE}/BIOS/${BIOS_NAME} $mods
+			show_pass_msg "Diag download OK"
+		else
+			show_fail_message "Please make sure $BIOS_NAME is exsit!!!"
+			show_fail_msg "Diag download OK"
+			exit 1
+		fi
 	fi
-fi
+else
+	show_pass_msg "Diag download OK"
+fi	
 
 }
 #####run diag#########################################################
@@ -760,65 +938,140 @@ if [ $Run_Mode = "0" ];then ###2024-06-15
 			# fi	
 		# fi
 	if [ ${current_stc_name} = "FLA" ];then
-		test_item="rwcsv FLA bioscheck"
+		test_item="rwcsv FLA"
 		run_command "$test_item"
 		if [ $? -eq 0 ];then
-			Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_pass
-			show_pass_message "FLA station need poweroff and turn off/on 54v PSU as well"	
+			resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_FLA*" 2>/dev/null)
+			if [ -n "$resf" ];then
+				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}				
+				check_station ${Scan_Upper_SN} FLA PASS
+				show_pass_message "FLA station have passed need poweroff and turn off/on 54v PSU as well"
+			else
+				show_fail_message "FLA can't find pass log please check" 
+			fi	
 		else
-			Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg} 		
+			ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_FLA*" 2>/dev/null)
+			if [ -n "$ress" ];then
+				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				check_station ${Scan_Upper_SN} FLA FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+			else
+				show_warning_message "Current station is FLA! it's not a true fail, please change the tester and retest or call TE!!!"
+			fi				
 		fi
 	elif [ ${current_stc_name} = "FLA2" ];then
 		test_item="rwcsv FLA2"
 		run_command "$test_item"
 		if [ $? -eq 0 ];then
-			Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_pass
-			show_pass_message "FLA2 station need poweroff and turn off/on 54v PSU as well"	
+			resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_FLA*" 2>/dev/null)
+			if [ -n "$resf" ];then
+				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				#show_pass
+				check_station ${Scan_Upper_SN} FLA2 PASS
+				show_pass_message "FLA2 station have passed need poweroff and turn off/on 54v PSU as well"
+			else
+				show_fail_message "FLA2 can't find pass log please check" 
+			fi					
 		else
-			Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}			
+			ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_FLA*" 2>/dev/null)
+			if [ -n "$ress" ];then			
+				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				check_station ${Scan_Upper_SN} FLA2 FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+			else
+				show_warning_message "Current station is FLA2! it's not a true fail, please change the tester and retest or call TE!!!"
+			fi					
 		fi	
 	elif [ ${current_stc_name} = "FLB" ];then
 		test_item="rwcsv FLB"
 		run_command "$test_item"
 		if [ $? -eq 0 ];then
-			Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_pass
-			if [ "$MACHINE" = "G520" ];then
-				sleep 10
-				reboot
-			else	
-				show_pass_message "FLB station need poweroff and turn off/on 54v PSU as well"
-			fi		
+			resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_FLB*" 2>/dev/null)
+			if [ -n "$resf" ];then		
+				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				#show_pass
+				check_station ${Scan_Upper_SN} FLB PASS
+				if [ "$MACHINE" = "G520" ];then
+					sleep 10
+					reboot
+				else	
+					show_pass_message "FLB station have passed need poweroff and turn off/on 54v PSU as well"
+				fi
+			else
+				show_fail_message "FLB can't find pass log please check" 
+			fi					
 		else
-			Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}	
+			ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_FLB*" 2>/dev/null)
+			if [ -n "$ress" ];then
+				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				check_station ${Scan_Upper_SN} FLB FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+			else
+				show_warning_message "Current station is FLB! it's not a true fail, please change the tester and retest or call TE!!!"
+			fi	
 		fi
 	elif [ ${current_stc_name} = "FLC" ];then
 		test_item="rwcsv FLC"
 		run_command "$test_item"
 		if [ $? -eq 0 ];then
-			Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_pass
-			show_pass_message "FLC station need poweroff and turn off/on 54v PSU as well"	
+			resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_FLC*" 2>/dev/null)
+			if [ -n "$resf" ];then		
+				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				#show_pass
+				check_station ${Scan_Upper_SN} FLC PASS
+				show_pass_message "FLC station have passed need poweroff and turn off/on 54v PSU as well"
+			else
+				show_fail_message "FLC can't find pass log please check" 
+			fi				
 		else
-			Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}	
+			ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_FLC*" 2>/dev/null)
+			if [ -n "$ress" ];then
+				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				check_station ${Scan_Upper_SN} FLC FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+			else
+				show_warning_message "Current station is FLC! it's not a true fail, please change the tester and retest or call TE!!!"
+			fi	
 		fi
 	elif [ ${current_stc_name} = "CHIFLASH" ];then
 		test_item="rwcsv CHIFLASH"
 		run_command "$test_item"
 		if [ $? -eq 0 ];then
-			Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_pass
-			sleep 10
-			reboot	
+			resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_CHI*" 2>/dev/null)
+			if [ -n "$resf" ];then		
+				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				show_pass
+				sleep 10
+				reboot
+			else
+				show_fail_message "CHIFLASH can't find pass log please check" 
+			fi				
 		else
-			Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-			show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}	
+			ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_CHI*" 2>/dev/null)
+			if [ -n "$ress" ];then
+				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				check_station ${Scan_Upper_SN} CHIFLASH FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+			else
+				show_warning_message "Current station is CHIFLASH! it's not a true fail, please change the tester and retest or call TE!!!"
+			fi	
+		fi
+	elif [ ${current_stc_name} = "TPC" ];then
+		test_item="TPC"
+		run_command "$test_item"
+		if [ $? -eq 0 ];then
+			resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_TPC*" 2>/dev/null)
+			if [ -n "$resf" ];then		
+				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				#show_pass
+				check_station ${Scan_Upper_SN} TPC PASS
+				#sleep 10
+			else
+				show_fail_message "TPC can't find pass log please check" 
+			fi				
+		else
+			ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_TPC*" 2>/dev/null)
+			if [ -n "$ress" ];then
+				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+				check_station ${Scan_Upper_SN} TPC FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+			else
+				show_warning_message "Current station is TPC! it's not a true fail, please change the tester and retest or call TE!!!"
+			fi	
 		fi		
 	elif [ ${current_stc_name} = ${Tstation} ];then ####for clear BBX station### 2024-04-26
 		test_item="inforcheck bioscheck ${current_stc_name}"
@@ -828,8 +1081,8 @@ if [ $Run_Mode = "0" ];then ###2024-06-15
 				resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_${current_stc_name}*" 2>/dev/null)
 				resc=$(find $LOGFILE/ -name "*${Scan_Lower_SN}_P_${current_stc_name}*" 2>/dev/null)
 				if [ -n "$resf" ] && [ -n "$resc" ];then
-					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
 					show_pass
 					if [ "$cont" = "true" ];then
 						sleep 10
@@ -837,49 +1090,84 @@ if [ $Run_Mode = "0" ];then ###2024-06-15
 					fi
 						
 				elif [ -n "$resf" ] ; then
-					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					show_pass
+					if [ "$cont" = "true" ];then
+						sleep 10
+						reboot
+					fi
+				elif [ -n "$resc" ];then
+					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
 					show_pass
 					if [ "$cont" = "true" ];then
 						sleep 10
 						reboot
 					fi
 				else
-					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
+					show_fail_message "${current_stc_name} can't find pass log please check" 
+				fi	
+			else
+				resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_${current_stc_name}*" 2>/dev/null)
+				if [ -n "$resf" ];then
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
 					show_pass
 					if [ "$cont" = "true" ];then
 						sleep 10
 						reboot
 					fi
+				else
+					show_fail_message "${current_stc_name} can't find pass log please check"
 				fi	
-			else
-				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-				show_pass
-				if [ "$cont" = "true" ];then
-					sleep 10
-					reboot
-				fi
 			fi	
 		else
 			if [ $testqty = "2" ];then
 				resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_${current_stc_name}*" 2>/dev/null)
 				resc=$(find $LOGFILE/ -name "*${Scan_Lower_SN}_P_${current_stc_name}*" 2>/dev/null)
 				if [ -n "$resf" ];then
-					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
-					show_fail ${Scan_Lower_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					check_station ${Scan_Upper_SN} ${current_stc_name} PASS
+					Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
+					check_station ${Scan_Lower_SN} ${current_stc_name} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}	
 				elif [ -n "$resc" ];then	
-					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
-					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
+					check_station ${Scan_Lower_SN} ${current_stc_name} PASS
+					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					check_station ${Scan_Upper_SN} ${current_stc_name} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
 				else
-					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
-					Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
-					show_fail ${Scan_Lower_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+					ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_${current_stc_name}*" 2>/dev/null)
+					resl=$(find $LOGFILE/ -name "*${Scan_Lower_SN}_F_${current_stc_name}*" 2>/dev/null)
+					if [ -n "$ress" ] && [ -n "$resl" ];then
+						Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+						check_station ${Scan_Upper_SN} ${current_stc_name} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+						Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
+						check_station ${Scan_Lower_SN} ${current_stc_name} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+					else
+						if [ $m = "inforcheck" ] || [ $m = "bioscheck" ];then
+							show_warning_message "###############################warning#####################################"
+							show_warning_message "Current station is ${current_stc_name}! $m is not a true fail please change the tester and retest!!!" 
+							show_warning_message "if still $m fail please call TE to check wareconn test configuration!!!"
+						else
+							show_warning_message "###############################warning#####################################" 
+							show_warning_message "Current station is ${current_stc_name}! it is not a true fail please change the tester and retest!!!"
+						fi
+					fi	
+
 				fi		
 			else
-				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-				show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+				ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_${current_stc_name}*" 2>/dev/null)
+				if [ -n "$ress" ];then
+					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					check_station ${Scan_Upper_SN} ${current_stc_name} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}	
+				else
+					if [ $m = "inforcheck" ] || [ $m = "bioscheck" ];then
+						show_warning_message "###############################warning#####################################"
+						show_warning_message "Current station is ${current_stc_name}! $m is not a true fail please change the tester and retest!!!" 
+						show_warning_message "if still $m fail please call TE to check wareconn test configuration!!!"
+					else
+						show_warning_message "###############################warning#####################################"
+						show_warning_message "Current station is ${current_stc_name}! it is not a true fail please change the tester and retest!!!"
+					fi
+				fi	
 			fi	
 		fi
 	else
@@ -890,66 +1178,102 @@ if [ $Run_Mode = "0" ];then ###2024-06-15
 				resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_${Tstation}*" 2>/dev/null)
 				resc=$(find $LOGFILE/ -name "*${Scan_Lower_SN}_P_${Tstation}*" 2>/dev/null)
 				if [ -n "$resf" ] && [ -n "$resc" ];then
-					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
 					show_pass
 					if [ "$cont" = "true" ];then
 						sleep 10
 						reboot
 					fi
 				elif [ -n "$resf" ] ; then
-					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					show_pass
+					if [ "$cont" = "true" ];then
+						sleep 10
+						reboot
+					fi
+				elif [ -n "$resc" ];then
+					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
 					show_pass
 					if [ "$cont" = "true" ];then
 						sleep 10
 						reboot
 					fi
 				else
-					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
+					show_fail_message "${Tstation} can't find pass log please check"
+				fi	
+			else
+				resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_${Tstation}*" 2>/dev/null)
+				if [ -n "$resf" ];then
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
 					show_pass
 					if [ "$cont" = "true" ];then
 						sleep 10
 						reboot
 					fi
+				else
+					show_fail_message "${Tstation} can't find pass log please check"
 				fi	
-			else
-				Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-				show_pass
-				if [ "$cont" = "true" ];then
-					sleep 10
-					reboot
-				fi
 			fi	
 		else
 			if [ $testqty = "2" ];then
 				resf=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_P_${Tstation}*" 2>/dev/null)
 				resc=$(find $LOGFILE/ -name "*${Scan_Lower_SN}_P_${Tstation}*" 2>/dev/null)
 				if [ -n "$resf" ];then
-					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
-					show_fail ${Scan_Lower_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+					Upload_Log ${Scan_Upper_SN} PASS ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					check_station ${Scan_Upper_SN} ${Tstation} PASS
+					Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
+					check_station ${Scan_Lower_SN} ${Tstation} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
 				elif [ -n "$resc" ];then	
-					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
-					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+					Upload_Log ${Scan_Lower_SN} PASS ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
+					check_station ${Scan_Lower_SN} ${Tstation} PASS
+					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					check_station ${Scan_Upper_SN} ${Tstation} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
 				else
-					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-					show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
-					Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC}
-					show_fail ${Scan_Lower_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+					ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_${Tstation}*" 2>/dev/null)
+					resl=$(find $LOGFILE/ -name "*${Scan_Lower_SN}_F_${Tstation}*" 2>/dev/null)
+					if [ -n "$ress" ] && [ -n "$resl" ];then
+						Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+						check_station ${Scan_Upper_SN} ${Tstation} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+						Upload_Log ${Scan_Lower_SN} FAIL ${Input_Lower_Eboard} ${Input_Lower_ESN} ${Input_Lower_HSC} ${Output_Lower_699PN}
+						check_station ${Scan_Lower_SN} ${Tstation} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+					else
+						if [ $m = "inforcheck" ] || [ $m = "bioscheck" ];then
+							show_warning_message "###############################warning#####################################" 
+							show_warning_message "Current station is ${Tstation}! $m is not a true fail please change the tester and retest!!!" 
+							show_warning_message "if still $m fail please call TE to check wareconn test configuration!!!"
+						else
+							show_warning_message "###############################warning#####################################" 
+							show_warning_message "Current station is ${Tstation}! it is not a true fail please change the tester and retest!!!"
+						fi
+					fi	
 				fi		
 			else
-				Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC}
-				show_fail ${Scan_Upper_SN} ${FactoryErrorCode} ${FactoryErrorMsg}
+				ress=$(find $LOGFILE/ -name "*${Scan_Upper_SN}_F_${Tstation}*" 2>/dev/null)
+				if [ -n "$ress" ];then
+					Upload_Log ${Scan_Upper_SN} FAIL ${Input_Upper_Eboard} ${Input_Upper_ESN} ${Input_Upper_HSC} ${Output_Upper_699PN}
+					check_station ${Scan_Upper_SN} ${Tstation} FAIL ${FactoryErrorCode} ${FactoryErrorMsg}
+				else
+					if [ $m = "inforcheck" ] || [ $m = "bioscheck" ];then
+						show_warning_message "###############################warning#####################################" 
+						show_warning_message "Current station is ${Tstation}! $m is not a true fail please change the tester and retest!!!" 
+						show_warning_message "if still $m fail please call TE to check wareconn test configuration!!!"
+					else
+						show_warning_message "###############################warning#####################################"
+						show_warning_message "Current station is ${Tstation}! it is not a true fail please change the tester and retest!!!"
+					fi
+				fi	
 			fi	
 		fi	
 	fi
 else
 	cd $mods
-	if [ $station = "CHIFLASH" ] || [ $station = "FLA2" ];then
+	if [ $station = "FLA2" ];then
 		Tstation="FLA"
 	elif [ $station = "IST2" ];then
 		Tstation="IST"
+	elif [ $station = "CHIFLASH" ];then
+		Tstation="CHI"
 	else
 		Tstation=$current_stc_name
 	fi	
@@ -1184,6 +1508,7 @@ echo "==========================================================================
 echo "Start time              :$start_time" >>"${filename}"
 echo "End time                :$(date '+%F %T')" >>"${filename}"
 echo "Part number             :${Input_Upper_PN}" >>"${filename}"
+echo "699Part number          :${6}" >>"${filename}"
 echo "Serial number           :${1}" >>"${filename}"
 echo "operator_id             :`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`" >>"${filename}"
 echo "fixture_id              :`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`" >>"${filename}"
@@ -1259,7 +1584,7 @@ run_command()
 get_information()
 {
 MACHINE=$(get_config "MACHINE")
-Input_Upper_PN=$(get_config "900PN")
+Input_Upper_PN=$(get_config "part_number")
 current_stc_name=$(get_config "current_stc_name")
 NVFLASH_VER=$(get_config "NVFLAH_VER")
 NVINFOROM=$(get_config "NVINFOROM")
@@ -1270,10 +1595,12 @@ Input_Script=$(get_config "SCRIPT_VER")
 operator_id="`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`"
 fixture_id="`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`"
 
-if [ $current_stc_name = "CHIFLASH" ] || [ $current_stc_name = "FLA2" ];then
+if [ $current_stc_name = "FLA2" ];then
 	Tstation="FLA"
 elif [ $current_stc_name = "IST2" ];then
 	Tstation="IST"
+elif [ $current_stc_name = "CHIFLASH" ];then
+	Tstation="CHI"	
 else
 	Tstation=$current_stc_name
 fi
@@ -1311,7 +1638,7 @@ if [ $Run_Mode = "0" ];then #### 2024-06-15
 		
 		fi
 		
-	elif [[ "$list_st" =~ "$current_stc_name" ]];then
+	elif [[ "${list_st[@]}" =~ "$current_stc_name" ]];then
 		diag_name=$(get_config "Diag1")
 		diag_VER=$diag_name.tar.gz
 		#echo $diag_VER
@@ -1323,7 +1650,7 @@ if [ $Run_Mode = "0" ];then #### 2024-06-15
 			Run_Diag
 		
 		fi
-	elif [[ "$list_stn" =~ "$current_stc_name" ]]; then
+	elif [[ "${list_stn[@]}" =~ "$current_stc_name" ]]; then
 		cont="false"
 		show_fail_message "Current Station is $current_stc_name, need more spare parts Please check!!!"
 		pause
@@ -1426,8 +1753,10 @@ upload_start_log()
 #####wareconn control script version##################################################################
 script_check()
 {
-
-	if [ "${Script_VER}" = "${Input_Script}" ];then
+	local_sum=$(md5sum /mnt/nv/$Script_File | awk '{print $1}')
+	server_sum=$(md5sum ${Diag_Path}/${Input_Script}_${Script_File} | awk '{print $1}')
+	
+	if [ "${Script_VER}" = "${Input_Script}" ] && [ "$local_sum" = "$server_sum" ];then
 		echo "Script Version is ${Script_VER}"
 	else
 		echo "Script Version is ${Script_VER}"
@@ -1463,6 +1792,7 @@ cd $LOGFILE
 
 if [ $current_stc_name = $Tstation ];then
 	LogName=$(find $LOGFILE/ -name "*$1_*_${current_stc_name}*.tsg" 2>/dev/null)
+	LogNamea=$(find $LOGFILE/ -name "*$1_*_${current_stc_name}*.log" 2>/dev/null)
 	if [ -n "$LogName" ];then
 		if [ "$2" = "PASS" ];then
 			FactoryErrorCode="0"
@@ -1533,6 +1863,53 @@ if [ $current_stc_name = $Tstation ];then
 		echo "" >> $filenames.log
 		echo "" >> $filenames.log
 		echo "****END****" >> $filenames.log
+	elif [ -n "$LogNamea" ];then
+		if [ "$2" = "PASS" ];then
+			FactoryErrorCode="0"
+		else	
+			FactoryErrorCode=$(grep "FactoryErrorCode        :" $LogNamea | awk -F':' '{print $2}' | tr -d ' ')
+		fi
+		FactoryErrorMsg="NA"
+		filenames=$(find $LOGFILE/ -name "FXTJ_NA_${Input_Upper_PN}_$1_*.log" 2>/dev/null)
+		if [ -n "$filenames" ];then
+			echo "$Eboard:$Eboard_SN" >> $filenames ##from wareconn
+			echo "" >> $filenames
+			echo "Factory Information" >> $filenames
+			echo "Monitor SN:" >> $filenames ##??
+			echo "HardDisk SN:" >> $filenames ##??
+			echo "HardDisk Health:N/A" >> $filenames
+			echo "Power-On Time Count:" >> $filenames ##??
+			echo "Drive Power Cycle Count:" >> $filenames ##??
+			echo "CPUID:`dmidecode -t 4 | grep "ID" | awk -F ':' '{print $2}'`" >> $filenames 
+			echo "Brand String: `dmidecode -t 4 | grep "Version" | awk -F ':' '{print $2}'` " >> $filenames
+			echo "Mac Address:$HOST_MAC_ADDR" >> $filenames ##from tsg log
+			echo "DiagVer:${diag_name}" >> $filenames
+			echo "PCIE Riser Card ID:NONE" >> $filenames ##??
+			echo "BrdSN:$1" >> $filenames
+			echo "FLAT ID:`grep "fixture_id=" $SCANFILE |sed 's/.*= *//'`" >> $filenames
+			echo "Routing:${current_stc_name}" >> $filenames
+			echo "FOX_Routing:${current_stc_name}" >> $filenames
+			echo "PN:${Input_Upper_PN}" >> $filenames
+			echo "BIOS:$BIOS_VER" >> $filenames
+			echo "BIN:$Bin" >> $filenames ##??
+			echo "Error Code:$FactoryErrorCode" >> $filenames ##use factory error code 
+			echo "StartTestTime:$StartTestTime" >> $filenames
+			echo "EndTesttime:$EndTesttime" >> $filenames
+			echo "Operator:`grep "operator_id=" $SCANFILE |sed 's/.*= *//'`" >> $filenames
+			echo "System Ver:`cat /etc/centos-release`" >> $filenames 
+			echo "SFC:YES" >> $filenames
+			echo "PortWell-B SN:`dmidecode -t 1 | grep "Serial Number" | awk -F ':' '{print $2}'`" >> $filenames ##ipmitool 
+			echo "Hotplug Status:YES" >> $filenames ##TJ all testers enable Hotplug
+			echo "0SN_From_SCAN,,relates_slots,$PORT_ADDRESS" >> $filenames ##from tsg log
+			echo "0SN_From_SCAN,,relates_slots,$PORT_ADDRESS" >> $filenames ##from tsg log
+			echo "QR_CODE: N/A" >> $filenames ##??
+			echo "HS_QR_CODE:$HS_QR_CODE" >> $filenames ##??
+			echo "" >> $filenames
+			echo "" >> $filenames
+			echo "****END****" >> $filenames
+		else
+			show_fail_message "Can't find the analysis Log"
+		fi	
 	else
 		show_fail_message "Can't find the analysis Log"
 	fi	
@@ -1657,45 +2034,72 @@ HS_QR_CODE=""
 Input_RestAPI_Message=""
 part_number=""
 service_status=""
-
+board_699pn=""
 ###API
 
-####TJAPI###############################
-TID="client_id=NocHScsf53aqE"
-TSECRET="client_secret=f8d6b0450c2a2af273a26569cdb0de04"
-####NCAPI###############################
-ID="client_id=vE7BhzDJhqO"
-SECRET="client_secret=0f40daa800fd87e20e0c6a8230c6e28593f1904c7edfaa18cbbca2f5bc9272b5"
-########################################
-TYPE="grant_type=client_credentials"
-furl="http://$NC_API_IP/api/v1/Oauth/token"
-iurl="http://$NC_API_IP/api/v1/ItemInfo/get"
-turl="http://$NC_API_IP/api/v1/Station/get"
 ##get_token#############################
 
-echo "get token from wareconn API"
-Input_RestAPI_Message=$(curl -X GET "$NC_API_IP/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
-if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-	token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
-	show_pass_message "get_token successful:$token"	
-else
-	show_fail_message "$Input_RestAPI_Message"
-	show_fail_message "get token Fail Please check net cable or call TE"
-	exit 1
-fi
+# echo "get token from wareconn API"
+# max_attempts=3
+# attempt=1
+# sleep_time=5
+# timeout=60
+# while [ $attempt -le $max_attempts ]; do
+    # show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+    # Input_RestAPI_Message=$(curl -m 60 -k "https://$API_IP:443/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
+    # curl_exit_code=$?
+
+    # if [ $curl_exit_code -eq 0 ]; then
+        # break
+    # fi
+
+    # if [ $attempt -lt $max_attempts ]; then
+        # sleep $sleep_time
+    # fi
+
+    # ((attempt++))
+# done
+# if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+	# token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
+	# show_pass_message "get_token successful:$token"	
+# else
+	# show_fail_message "$Input_RestAPI_Message"
+	# show_fail_message "get token Fail Please check net cable or call TE"
+	# exit 1
+# fi
 
 ##get_information from wareconn#########
 echo "get data information from wareconn"
-Input_RestAPI_Message=$(curl -X GET "$iurl" -H "content-type: application/json" -H "Authorization: Bearer "$token"" -d '{"serial_number":'"$1"'}') ####add parameters type 2024-05-07 
+
+max_attempts=3
+attempt=1
+sleep_time=5
+timeout=60
+while [ $attempt -le $max_attempts ]; do
+    show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+    Input_RestAPI_Message=$(curl -m 60 -k "$iurl?serial_number=$1") ####add parameters type 2024-05-07 
+    curl_exit_code=$?
+
+    if [ $curl_exit_code -eq 0 ]; then
+        break
+    fi
+
+    if [ $attempt -lt $max_attempts ]; then
+        sleep $sleep_time
+    fi
+
+    ((attempt++))
+done
 #echo $Input_RestAPI_Message
 #pause
-if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
 	station_name=$(echo "$Input_RestAPI_Message" | jq -r '.list.now_stn')
 	Eboard_SN=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_serial_number')
 	Eboard=$(echo "$Input_RestAPI_Message" | jq -r '.list.equipment_fixture[-1].equipment_name')
-	HS_QR_CODE=$(echo "$Input_RestAPI_Message" | jq -r '.list.assy_records[-1].serial_number')
+	HS_QR_CODE=$(echo "$Input_RestAPI_Message" | jq -r '.list.replace_parts[-1].sn')
 	part_number=$(echo "$Input_RestAPI_Message" | jq -r '.list.part_number')
 	service_status=$(echo "$Input_RestAPI_Message" | jq -r '.list.is_serving')
+	board_699pn=$(echo "$Input_RestAPI_Message" | jq -r '.list."699pn"')
 	show_pass_msg "$1 Get data information from wareconn!!!"
 else	
 	show_fail_message "$Input_RestAPI_Message"
@@ -1714,36 +2118,61 @@ station_name=""
 
 ###API
 
-####TJAPI###############################
-TID="client_id=NocHScsf53aqE"
-TSECRET="client_secret=f8d6b0450c2a2af273a26569cdb0de04"
-####NCAPI###############################
-ID="client_id=vE7BhzDJhqO"
-SECRET="client_secret=0f40daa800fd87e20e0c6a8230c6e28593f1904c7edfaa18cbbca2f5bc9272b5"
-########################################
-TYPE="grant_type=client_credentials"
-furl="http://$NC_API_IP/api/v1/Oauth/token"
-turl="http://$NC_API_IP/api/v1/Station/start"
 ##get_token#############################
 
 #if [ "$2" = "false" ];then
 
-	echo "get token from wareconn API"
-	Input_RestAPI_Message=$(curl -X GET "$NC_API_IP/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
-	if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-		token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
-		show_pass_message "get_token successful:$token"	
-	else
-		show_fail_message "$Input_RestAPI_Message"
-		show_fail_message "get token Fail Please check net cable or call TE"
-		exit 1
-	fi
+	# echo "get token from wareconn API"
+	# max_attempts=3
+	# attempt=1
+	# sleep_time=5
+	# timeout=60
+	# while [ $attempt -le $max_attempts ]; do
+		# show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+		# Input_RestAPI_Message=$(curl -m 60 -k "https://$API_IP:443/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
+		# curl_exit_code=$?
+
+		# if [ $curl_exit_code -eq 0 ]; then
+			# break
+		# fi
+
+		# if [ $attempt -lt $max_attempts ]; then
+			# sleep $sleep_time
+		# fi
+
+		# ((attempt++))
+	# done
+	# if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+		# token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
+		# show_pass_message "get_token successful:$token"	
+	# else
+		# show_fail_message "$Input_RestAPI_Message"
+		# show_fail_message "get token Fail Please check net cable or call TE"
+		# exit 1
+	# fi
 
 	## result start to api/vi/Station/start
 	echo "upload start info to API "
+	max_attempts=3
+	attempt=1
+	sleep_time=5
+	timeout=60
+	while [ $attempt -le $max_attempts ]; do
+		show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+		Input_RestAPI_Message=$(curl -m 60 -k -X GET "$turl?serial_number=$1&station_name=$current_stc_name&start_time=${stime}&operator_id=$operator_id&test_machine_number=$fixture_id&test_program_name=$diag_name&test_program_version=$CFG_VERSION&pn=$Input_Upper_PN&model=$PROJECT")
+		curl_exit_code=$?
 
-	Input_RestAPI_Message=$(curl -X GET "$turl" -H "content-type: application/json" -H "Authorization: Bearer "$token"" -d '{"serial_number":"'"$1"'","station_name":"'"$current_stc_name"'","start_time":"'"${stime}"'","operator_id":"'"$operator_id"'","test_machine_number":"'"$fixture_id"'","test_program_name":"'"$diag_name"'","test_program_version":"'"$CFG_VERSION"'","pn":"'"$Input_Upper_PN"'","model":"'"$PROJECT"'"}')
-	if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+		if [ $curl_exit_code -eq 0 ]; then
+			break
+		fi
+
+		if [ $attempt -lt $max_attempts ]; then
+			sleep $sleep_time
+		fi
+
+		((attempt++))
+	done
+	if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
 		show_pass_msg "$1 upload start information"	
 
 	else	
@@ -1764,39 +2193,115 @@ Input_RestAPI_Message=""
 
 ###API
 
-####TJAPI###############################
-TID="client_id=NocHScsf53aqE"
-TSECRET="client_secret=f8d6b0450c2a2af273a26569cdb0de04"
-####NCAPI###############################
-ID="client_id=vE7BhzDJhqO"
-SECRET="client_secret=0f40daa800fd87e20e0c6a8230c6e28593f1904c7edfaa18cbbca2f5bc9272b5"
-########################################
-TYPE="grant_type=client_credentials"
-furl="http://$NC_API_IP/api/v1/Oauth/token"
-rurl="http://$NC_API_IP/api/v1/Station/end"
 ##get_token#############################
 log_path="D:\\$PROJECT\\${Input_Upper_PN}\\${filename}"
-echo "get token from wareconn API"
-Input_RestAPI_Message=$(curl -X GET "$NC_API_IP/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
-if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
-	token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
-	show_pass_message "get_token successful:$token"	
-else
-	show_fail_message "$Input_RestAPI_Message"
-	show_fail_message "Get token Fail Please check net cable or call TE"
-	exit 1
-fi
+# echo "get token from wareconn API"
+# max_attempts=3
+# attempt=1
+# sleep_time=5
+# timeout=60
+# while [ $attempt -le $max_attempts ]; do
+    # show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+    # Input_RestAPI_Message=$(curl -m 60 -k "https://$API_IP:443/api/v1/Oauth/token?${ID}&${SECRET}&${TYPE}")
+    # curl_exit_code=$?
+
+    # if [ $curl_exit_code -eq 0 ]; then
+        # break
+    # fi
+
+    # if [ $attempt -lt $max_attempts ]; then
+        # sleep $sleep_time
+    # fi
+
+    # ((attempt++))
+# done
+# if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+	# token=$(echo "$Input_RestAPI_Message" | awk -F '"' '{print $10 }')
+	# show_pass_message "get_token successful:$token"	
+# else
+	# show_fail_message "$Input_RestAPI_Message"
+	# show_fail_message "Get token Fail Please check net cable or call TE"
+	# exit 1
+# fi
 
 ##Report station result to api/vi/Station/end
 echo "report station result to wareconn API "
-Input_RestAPI_Message=$(curl -X GET "$rurl?serial_number=$1&log_path=$log_path" -H "content-type: application/json" -H "Authorization: Bearer "$token"")
-if echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
+
+max_attempts=3
+attempt=1
+sleep_time=5
+timeout=60
+while [ $attempt -le $max_attempts ]; do
+    show_warning_message "connecting API $attempt times (timeout: ${timeout}s)..."   
+    Input_RestAPI_Message=$(curl -m 60 -k "$rurl?serial_number=$1&log_path=$log_path")
+    curl_exit_code=$?
+
+    if [ $curl_exit_code -eq 0 ]; then
+        break
+    fi
+
+    if [ $attempt -lt $max_attempts ]; then
+        sleep $sleep_time
+    fi
+
+    ((attempt++))
+done
+if [ -n "$Input_RestAPI_Message" ] && echo "$Input_RestAPI_Message" | jq -e '.code == 0' > /dev/null; then
 	show_pass_msg "$1 report result pass"	
 else	
 	show_fail_message "$Input_RestAPI_Message"
 	show_fail_message "$1 report result FAIL Please call TE or wareconn Team"
 	#exit 1
 fi
+
+}
+
+##########################################################################################################
+
+check_station()
+{
+echo "checking station please wait a moment..."
+sleep 10
+Input_Wareconn_Serial_Number_RestAPI_Mode_ItemInfo $1
+
+if [ $station_name = "$2" ];then
+	if [ $3 = "PASS" ];then
+		show_warning_message "################################warning#################################" 
+		show_warning_message "$1 not pass $2 station please reboot and retest"
+		show_warning_message "If $1 still at $2 station please call TE!!!"
+	else
+		error_code=$4
+		error_code=${error_code: -3}
+		if [[ "${list_error[@]}" =~ "${error_code}" ]];then
+			show_warning_message "#################################warning##############################" 
+			show_warning_message "Current station is $2! EC$FactoryErrorCode can retest,please change the interposer and tester to retest!!!"
+		else
+			show_warning_message "#################################warning##############################" 
+			show_warning_message "Current station is $2! EC$FactoryErrorCode can retest,please change the tester and retest!!!"
+		fi	
+	fi	
+else
+	if [ $3 = "PASS" ];then
+		show_warning_message "################################warning####################################"
+		show_warning_message "$1 have passed $2 next station is $station_name"
+	else
+		error_code=$4
+		error_code=${error_code: -3}
+		if [[ "${list_tpc_error[@]}" =~ "${error_code}" ]];then
+			show_fail $1 $4 $5
+			show_warning_message "###############################warning#####################################" 
+			show_warning_message "$1 have failed $2,next please go to TPC process"	
+		elif [[ "${list_ist_error[@]}" =~ "${error_code}" ]];then
+			show_fail $1 $4 $5
+			show_warning_message "###############################warning#####################################" 
+			show_warning_message "$1 have failed $2 next please go to IST process"
+		else
+			show_fail $1 $4 $5
+			show_warning_message "###############################warning#####################################" 
+			show_warning_message "$1 have failed $2 next station is $station_name"
+		fi	
+	fi	
+fi	
 
 }
 
@@ -1807,17 +2312,85 @@ fi
 
 #export flow_name="${current_stc_name}"
 
+if [ $site = "TJ" ];then
+	declare -u operator_id
+	diagserver_IP=$TJ_diagserver_IP
+	logserver_IP=$TJ_logserver_IP
+	API_IP=$TJ_API_IP
+	ID=$TID
+	SECRET=$TSECRET
+	pw_diag=$TJ_pw_diag
+	pw_log=$TJ_pw_log
+
+elif [ $site = "NC" ];then
+	diagserver_IP=$NC_diagserver_IP
+	logserver_IP=$NC_logserver_IP
+	API_IP=$NC_API_IP
+	ID=$NID
+	SECRET=$NSECRET
+	pw_diag=$NC_pw_diag
+	pw_log=$NC_pw_log
+else
+	show_warning_message "Please check the site"
+	exit 1	
+fi
+
+
 rm -rf $LOGFILE/*
 echo "" > /var/log/message
 #sleep 50
-if [ ! -f $OPID ];then
+if [ ! -f $OPID ] && [ ! -d ${INI_folder} ];then
 	Input_Server_Connection
 fi
+
+if [ -f "$INI_folder/list_st.ini" ] && [ -f "$INI_folder/list_stn.ini" ] && [ -f "$INI_folder/single_list_stn.ini" ] && [ -f "$INI_folder/list_st_all.ini" ] && [ -f "$INI_folder/list_error.ini" ] && [ -f "$INI_folder/list_tpc_error.ini" ] && [ -f "$INI_folder/list_ist_error.ini" ];then
+	mapfile -t list_st < "$INI_folder/list_st.ini" 2>/dev/null
+	mapfile -t list_stn < "$INI_folder/list_stn.ini" 2>/dev/null
+	mapfile -t single_list_stn < "$INI_folder/single_list_stn.ini" 2>/dev/null
+	mapfile -t list_st_all < "$INI_folder/list_st_all.ini" 2>/dev/null
+	mapfile -t list_error < "$INI_folder/list_error.ini" 2>/dev/null
+	mapfile -t list_tpc_error < "$INI_folder/list_tpc_error.ini" 2>/dev/null
+	mapfile -t list_ist_error < "$INI_folder/list_ist_error.ini" 2>/dev/null	
+else
+	show_warning_message "make sure ini file is exist please call TE to check diag server"
+	exit 1
+fi		
+
+	
+surl="https://$API_IP:4443/api/v1/test-profile/get"
+iurl="https://$API_IP:4443/api/v1/ItemInfo/get"
+rurl="https://$API_IP:4443/api/v1/Station/end"
+turl="https://$API_IP:4443/api/v1/Station/start"	
 update
-ntpdate $NC_diagserver_IP
+ntpdate $diagserver_IP
 hwclock -w
 StartTestTime=`date +"%Y%m%d%H%M%S"`
-stime=$(date '+%FT%T'-04:00)
+if [ $site = "TJ" ];then
+	if [ ! -d aardvark ];then
+		if [ -d $Diag_Path/aardvark ];then
+			cp -rf $Diag_Path/aardvark ./
+		else
+			show_warning_message "Please call TE to check diag, aardvark is not exist"
+			exit 1
+		fi	
+	fi
+	stime=$(date '+%FT%T')%2B08:00
+elif [ $site = "NC" ];then
+	#####North America has time zone shifts to be judged
+	tz_abbrev=$(date +"%Z")
+	if [ "$tz_abbrev" = "EDT" ]; then
+		stime=$(date '+%FT%T'-04:00)
+	elif [ "$tz_abbrev" = "EST" ]; then
+		stime=$(date '+%FT%T'-05:00)
+	else
+		show_warning_message "Please call TE change Time Zone America/New_York"
+		exit 1
+	fi
+	
+else
+	show_warning_message "Please check the site"
+	exit 1	
+fi	
 export start_time=$(date '+%F %T')	
 
 Read_SN
@@ -1901,21 +2474,23 @@ if [ $testqty = "2" ]; then
 		Input_Upper_Eboard=$Eboard
 		Input_Upper_Status=$service_status
 		Input_Upper_HSC=$HS_QR_CODE
+		Input_Upper_699PN=$board_699pn
 		Input_Wareconn_Serial_Number_RestAPI_Mode_ItemInfo ${Output_Lower_SN}
 		Input_Lower_Station=$station_name
 		Input_Lower_ESN=$Eboard_SN
 		Input_Lower_Eboard=$Eboard
 		Input_Lower_Status=$service_status
-		Input_Lower_HSC=$HS_QR_CODE		
-		if [[ "$list_st_all" =~ "$Input_Lower_Station" ]] && [[ "$list_st_all" =~ "$Input_Upper_Station" ]]; then
+		Input_Lower_HSC=$HS_QR_CODE
+		Input_Lower_699PN=$board_699pn	
+		if [[ "${list_st_all[@]}" =~ "$Input_Lower_Station" ]] && [[ "${list_st_all[@]}" =~ "$Input_Upper_Station" ]]; then
 			Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Upper_SN}
-			Input_Upper_PN=$(grep "900PN" $mods/cfg/${Output_Upper_SN}.RSP | awk -F '=' '{ print $2 }'  )
+			Input_Upper_PN=$(grep "part_number" $mods/cfg/${Output_Upper_SN}.RSP | awk -F '=' '{ print $2 }'  )
 			Input_Upper_Station=$(grep "current_stc_name" $mods/cfg/${Output_Upper_SN}.RSP | awk -F '=' '{ print $2 }'  )
 			Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Lower_SN}
-			Input_Lower_PN=$(grep "900PN" $mods/cfg/${Output_Lower_SN}.RSP | awk -F '=' '{ print $2 }'  )
+			Input_Lower_PN=$(grep "part_number" $mods/cfg/${Output_Lower_SN}.RSP | awk -F '=' '{ print $2 }'  )
 			Input_Lower_Station=$(grep "current_stc_name" $mods/cfg/${Output_Lower_SN}.RSP | awk -F '=' '{ print $2 }'  )
 			
-			if [ ${Input_Upper_PN} = ${Input_Lower_PN} ] && [ ${Input_Upper_Station} = ${Input_Lower_Station} ] && [[ ! "$single_list_stn" =~ "$Input_Upper_Station" ]]; then
+			if [ ${Input_Upper_PN} = ${Input_Lower_PN} ] && [ ${Input_Upper_Station} = ${Input_Lower_Station} ] && [[ ! "${single_list_stn[@]}" =~ "$Input_Upper_Station" ]]; then
 				analysis_sta
 			else
 				show_fail_message "make sure the cards PN and station is right!!! "
@@ -1933,19 +2508,21 @@ if [ $testqty = "2" ]; then
 		Input_Upper_Eboard=$Eboard
 		Input_Upper_Status=$service_status
 		Input_Upper_HSC=$HS_QR_CODE
+		Input_Upper_699PN=$board_699pn
 		Input_Wareconn_Serial_Number_RestAPI_Mode_ItemInfo ${Output_Lower_SN}
 		Input_Lower_Station=$station_name
 		Input_Lower_ESN=$Eboard_SN
 		Input_Lower_Eboard=$Eboard
 		Input_Lower_Status=$service_status
 		Input_Lower_HSC=$HS_QR_CODE
+		Input_Lower_699PN=$board_699pn
 		read -p "Please Input station :" station
-		if [[ "$list_st_all" =~ "$station" ]];then
+		if [[ "${list_st_all[@]}" =~ "$station" ]];then
 			Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Upper_SN} $station
-			Input_Upper_PN=$(grep "900PN" $mods/cfg/${Output_Upper_SN}.RSP | awk -F '=' '{ print $2 }'  )
+			Input_Upper_PN=$(grep "part_number" $mods/cfg/${Output_Upper_SN}.RSP | awk -F '=' '{ print $2 }'  )
 			Input_Upper_Station=$(grep "current_stc_name" $mods/cfg/${Output_Upper_SN}.RSP | awk -F '=' '{ print $2 }'  )
 			Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Lower_SN} $station
-			Input_Lower_PN=$(grep "900PN" $mods/cfg/${Output_Lower_SN}.RSP | awk -F '=' '{ print $2 }'  )
+			Input_Lower_PN=$(grep "part_number" $mods/cfg/${Output_Lower_SN}.RSP | awk -F '=' '{ print $2 }'  )
 			Input_Lower_Station=$(grep "current_stc_name" $mods/cfg/${Output_Lower_SN}.RSP | awk -F '=' '{ print $2 }'  )
 
 			if [ ${Input_Upper_PN} = ${Input_Lower_PN} ]; then
@@ -1970,7 +2547,8 @@ else
 		Input_Upper_Eboard=$Eboard
 		Input_Upper_Status=$service_status
 		Input_Upper_HSC=$HS_QR_CODE
-		if [[ "$list_st_all" =~ "$Input_Upper_Station" ]]; then		
+		Input_Upper_699PN=$board_699pn
+		if [[ "${list_st_all[@]}" =~ "$Input_Upper_Station" ]]; then		
 			Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Upper_SN}
 			analysis_sta
 		else
@@ -1984,8 +2562,9 @@ else
 		Input_Upper_Eboard=$Eboard
 		Input_Upper_Status=$service_status
 		Input_Upper_HSC=$HS_QR_CODE
+		Input_Upper_699PN=$board_699pn
 		read -p "Please Input station :" station
-		if [[ "$list_st_all" =~ "$station" ]];then
+		if [[ "${list_st_all[@]}" =~ "$station" ]];then
 			Input_Wareconn_Serial_Number_RestAPI_Mode ${Output_Upper_SN} $station
 			analysis_sta
 		else
